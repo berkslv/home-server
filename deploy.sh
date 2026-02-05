@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+# Default options
+AUTO_YES=false
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,6 +44,21 @@ print_header() {
     echo -e "\n${GREEN}========================================${NC}"
     echo -e "${GREEN}  $1${NC}"
     echo -e "${GREEN}========================================${NC}\n"
+}
+
+# Prompt with auto-yes support
+prompt_continue() {
+    local message="${1:-Continue anyway?}"
+    if [ "$AUTO_YES" = true ]; then
+        print_info "Auto-accepting: $message"
+        return 0
+    fi
+    read -p "$message [y/N]: " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        return 0
+    fi
+    return 1
 }
 
 # Check if running as root
@@ -167,9 +185,7 @@ preflight_checks() {
     ARCH=$(uname -m)
     if [[ "$ARCH" != "aarch64" && "$ARCH" != "arm64" ]]; then
         print_warning "This script is optimized for ARM64 architecture, detected: $ARCH"
-        read -p "Continue anyway? [y/N]: " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        if ! prompt_continue "Continue anyway?"; then
             exit 1
         fi
     else
@@ -215,9 +231,7 @@ validate_external_drive() {
     local available=$(df -BG "$drive_path" | awk 'NR==2 {print $4}' | sed 's/G//')
     if [ "$available" -lt 20 ]; then
         print_warning "Less than 20GB available on $drive_path (${available}GB free)"
-        read -p "Continue anyway? [y/N]: " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        if ! prompt_continue "Continue anyway?"; then
             return 1
         fi
     else
@@ -473,6 +487,33 @@ show_summary() {
 
 # Main execution
 main() {
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -y|--yes)
+                AUTO_YES=true
+                shift
+                ;;
+            -h|--help)
+                echo "Usage: $0 [OPTIONS]"
+                echo
+                echo "Options:"
+                echo "  -y, --yes    Auto-accept all prompts (non-interactive mode)"
+                echo "  -h, --help   Show this help message"
+                echo
+                echo "Example:"
+                echo "  $0 -y        # Run in non-interactive mode"
+                echo "  wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | bash -s -- -y"
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Use -h or --help for usage information"
+                exit 1
+                ;;
+        esac
+    done
+    
     print_header "Raspberry Pi Home Server Deployment"
     
     check_root

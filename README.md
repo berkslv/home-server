@@ -59,7 +59,11 @@ sudo bash deploy.sh
 ### Method 2: wget One-Liner
 
 ```bash
-wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo bash
+# Interactive mode
+wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate | sudo bash
+
+# Non-interactive mode (auto-accept all prompts)
+wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate  | sudo bash -s -- -y
 ```
 
 ## Deployment Process
