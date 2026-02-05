@@ -268,8 +268,14 @@ get_external_drive_path() {
     
     echo
     local default_path="/mnt/external-ssd"
-    read -p "Enter external SSD mount path [$default_path]: " external_drive
-    external_drive=${external_drive:-$default_path}
+    
+    if [ "$AUTO_YES" = true ]; then
+        external_drive="$default_path"
+        print_info "Auto-accepting default path: $external_drive"
+    else
+        read -p "Enter external SSD mount path [$default_path]: " external_drive
+        external_drive=${external_drive:-$default_path}
+    fi
     
     # Validate
     if ! validate_external_drive "$external_drive"; then
