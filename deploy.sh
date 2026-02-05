@@ -121,7 +121,7 @@ install_docker() {
         rm /tmp/get-docker.sh
         
         # Add current user to docker group (if not root)
-        if [ -n "$SUDO_USER" ]; then
+        if [ -n "${SUDO_USER:-}" ]; then
             usermod -aG docker "$SUDO_USER"
             print_info "Added $SUDO_USER to docker group"
         fi
@@ -237,7 +237,8 @@ get_external_drive_path() {
     
     # List potential mount points
     local suggestions=()
-    for mount in /mnt/* /media/*/* /media/$SUDO_USER/*; do
+    local current_user="${SUDO_USER:-root}"
+    for mount in /mnt/* /media/*/* /media/$current_user/*; do
         if mountpoint -q "$mount" 2>/dev/null; then
             local size=$(df -BG "$mount" | awk 'NR==2 {print $2}' | sed 's/G//')
             local avail=$(df -BG "$mount" | awk 'NR==2 {print $4}' | sed 's/G//')

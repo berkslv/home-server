@@ -26,7 +26,7 @@ docker run -it --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock --
 
 # Inside container:
 mkdir -p /mnt/external-ssd
-wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | bash
+apt update && apt install wget -y && wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate | bash
 ```
 
 ## Verify Deployment
