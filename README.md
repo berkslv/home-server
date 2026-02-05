@@ -62,8 +62,9 @@ sudo bash deploy.sh
 # Interactive mode
 wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate | sudo bash
 
-# Non-interactive mode (auto-accept all prompts)
-wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate  | sudo bash -s -- -y
+# Non-interactive mode (requires CF_TUNNEL_TOKEN environment variable)
+export CF_TUNNEL_TOKEN="your-cloudflare-tunnel-token-here"
+wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh --no-check-certificate | sudo -E bash -s -- -y
 ```
 
 ## Deployment Process

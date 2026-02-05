@@ -314,14 +314,27 @@ configure_deployment() {
     
     # Cloudflare Tunnel Token
     print_header "Cloudflare Tunnel Configuration"
-    echo "To get your tunnel token:"
-    echo "  1. Go to https://one.dash.cloudflare.com/"
-    echo "  2. Navigate to Networks > Tunnels"
-    echo "  3. Create a new tunnel or select existing one"
-    echo "  4. Copy the tunnel token"
-    echo
-    read -sp "Enter Cloudflare Tunnel Token: " CF_TUNNEL_TOKEN
-    echo
+    
+    # Check if token provided via environment variable
+    if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
+        print_info "Using Cloudflare Tunnel Token from environment variable"
+    else
+        echo "To get your tunnel token:"
+        echo "  1. Go to https://one.dash.cloudflare.com/"
+        echo "  2. Navigate to Networks > Tunnels"
+        echo "  3. Create a new tunnel or select existing one"
+        echo "  4. Copy the tunnel token"
+        echo
+        
+        if [ "$AUTO_YES" = true ]; then
+            print_error "Cloudflare Tunnel Token required in non-interactive mode"
+            print_info "Set CF_TUNNEL_TOKEN environment variable or run without -y flag"
+            exit 1
+        fi
+        
+        read -sp "Enter Cloudflare Tunnel Token: " CF_TUNNEL_TOKEN
+        echo
+    fi
     
     if [ -z "$CF_TUNNEL_TOKEN" ]; then
         print_error "Cloudflare Tunnel Token is required"
