@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+  # Cloudflare Tunnel - Secure remote access
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN_FILE=/run/secrets/cf_tunnel_token
+    secrets:
+      - cf_tunnel_token
+    networks:
+      - home-server
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--timeout=2", "http://localhost:2000/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Portainer - Docker management UI
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - portainer_data:/data
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--timeout=2", "http://localhost:9000/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Glances - System monitoring
+  glances:
+    image: nicolargo/glances:latest-full
+    container_name: glances
+    restart: unless-stopped
+    pid: host
+    ports:
+      - "61208:61208"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/os-release:/etc/os-release:ro
+    environment:
+      - GLANCES_OPT=-w
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--timeout=2", "http://localhost:61208"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL - Database for Immich
+  immich-postgres:
+    image: tensorchord/pgvecto-rs:pg14-v0.2.0
+    container_name: immich-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+      POSTGRES_DB: immich
+    volumes:
+      - ${EXTERNAL_DRIVE}/immich/postgres:/var/lib/postgresql/data
+    secrets:
+      - db_password
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d immich"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis - Cache for Immich
+  immich-redis:
+    image: redis:7.2-alpine
+    container_name: immich-redis
+    restart: unless-stopped
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Immich Server - Main API server
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    container_name: immich-server
+    restart: unless-stopped
+    command: ['start.sh', 'immich']
+    ports:
+      - "2283:3001"
+    volumes:
+      - ${EXTERNAL_DRIVE}/immich/upload:/usr/src/app/upload
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_USERNAME: postgres
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: immich-redis
+      IMMICH_MACHINE_LEARNING_ENABLED: "false"
+      LOG_LEVEL: log
+    secrets:
+      - db_password
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--timeout=2", "http://localhost:3001/api/server-info/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Immich Microservices - Background jobs (no ML)
+  immich-microservices:
+    image: ghcr.io/immich-app/immich-server:release
+    container_name: immich-microservices
+    restart: unless-stopped
+    command: ['start.sh', 'microservices']
+    volumes:
+      - ${EXTERNAL_DRIVE}/immich/upload:/usr/src/app/upload
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      DB_HOSTNAME: immich-postgres
+      DB_USERNAME: postgres
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DB_DATABASE_NAME: immich
+      REDIS_HOSTNAME: immich-redis
+      IMMICH_MACHINE_LEARNING_ENABLED: "false"
+      LOG_LEVEL: log
+    secrets:
+      - db_password
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
+    networks:
+      - home-server
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+networks:
+  home-server:
+    driver: bridge
+
+volumes:
+  portainer_data:
+
+secrets:
+  db_password:
+    file: /opt/home-server/secrets/db_password
+  cf_tunnel_token:
+    file: /opt/home-server/secrets/cf_tunnel_token

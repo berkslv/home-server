@@ -1,0 +1,36 @@
+# Ignore secrets and sensitive data
+/opt/home-server/secrets/
+config.json
+*.log
+
+# Ignore data directories
+/mnt/*/immich/
+/media/*/immich/
+backups/
+
+# Docker
+docker-compose.override.yml
+
+# Environment files
+.env
+.env.local
+*.env
+
+# Cloudflare credentials
+.cloudflared/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+tmp/
+temp/
+*.tmp
