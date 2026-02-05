@@ -51,17 +51,15 @@ sudo mount /dev/sda1 /mnt/external-ssd  # Adjust device name as needed
 
 # Download and run deployment script
 cd /tmp
-git clone <your-repo-url> home-server
+git clone https://github.com/berkslv/home-server.git
 cd home-server
 sudo bash deploy.sh
 ```
 
 ### Method 2: wget One-Liner
 
-Once you've hosted the script on GitHub or a server:
-
 ```bash
-wget -qO- https://raw.githubusercontent.com/YOUR_USERNAME/home-server/main/deploy.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo bash
 ```
 
 ## Deployment Process

@@ -2,7 +2,7 @@
 #
 # Home Server Deployment Script
 # Deploys Immich, Portainer, Glances, and Cloudflare Tunnel on Raspberry Pi
-# Usage: wget -qO- https://raw.githubusercontent.com/YOUR_REPO/deploy.sh | bash
+# Usage: wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | bash
 #
 
 set -euo pipefail

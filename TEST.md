@@ -16,17 +16,17 @@ cd /workspace
 bash deploy.sh
 ```
 
-## Test with wget (Optional - Only if you want to test remote download)
+## Test with wget from GitHub
 
-This simulates downloading from GitHub/remote server. **Not needed for basic testing.**
+Test downloading directly from your GitHub repository:
 
 ```bash
-# Terminal 2: Run container and test wget download
+# Run container and test wget download
 docker run -it --rm --privileged -v /var/run/docker.sock:/var/run/docker.sock --network host ubuntu:22.04 bash
 
 # Inside container:
 mkdir -p /mnt/external-ssd
-wget -qO- http://localhost:8000/deploy.sh | bash
+wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | bash
 ```
 
 ## Verify Deployment
