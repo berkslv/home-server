@@ -205,17 +205,17 @@ preflight_checks() {
 validate_storage_directory() {
     local dir_path="$1"
     
-    print_info "Validating storage directory: $dir_path"
+    print_info "Validating storage directory: $dir_path" >&2
     
     # Create directory if it doesn't exist
     if [ ! -d "$dir_path" ]; then
-        print_info "Creating directory: $dir_path"
+        print_info "Creating directory: $dir_path" >&2
         mkdir -p "$dir_path"
     fi
     
     # Check if writable
     if ! touch "$dir_path/.write_test" 2>/dev/null; then
-        print_error "$dir_path is not writable"
+        print_error "$dir_path is not writable" >&2
         return 1
     fi
     rm -f "$dir_path/.write_test"
@@ -223,12 +223,12 @@ validate_storage_directory() {
     # Check available space (at least 20GB)
     local available=$(df -BG "$dir_path" | awk 'NR==2 {print $4}' | sed 's/G//')
     if [ "$available" -lt 20 ]; then
-        print_warning "Less than 20GB available on $dir_path (${available}GB free)"
+        print_warning "Less than 20GB available on $dir_path (${available}GB free)" >&2
         if ! prompt_continue "Continue anyway?"; then
             return 1
         fi
     else
-        print_success "Sufficient space available: ${available}GB"
+        print_success "Sufficient space available: ${available}GB" >&2
     fi
     
     return 0
