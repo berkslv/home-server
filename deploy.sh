@@ -236,17 +236,18 @@ validate_storage_directory() {
 
 # Get storage path for data
 get_storage_path() {
-    print_header "Storage Configuration"
-    
     local default_path="/var/lib/home-server"
+    local storage_path
     
-    print_info "Data will be stored locally on your SSD"
-    echo "Recommended path: $default_path"
-    echo
+    print_header "Storage Configuration" >&2
+    
+    print_info "Data will be stored locally on your SSD" >&2
+    echo "Recommended path: $default_path" >&2
+    echo >&2
     
     if [ "$AUTO_YES" = true ]; then
         storage_path="$default_path"
-        print_info "Using default path: $storage_path"
+        print_info "Using default path: $storage_path" >&2
     else
         read -p "Enter storage path [$default_path]: " storage_path
         storage_path=${storage_path:-$default_path}
@@ -254,10 +255,11 @@ get_storage_path() {
     
     # Validate
     if ! validate_storage_directory "$storage_path"; then
-        print_error "Storage directory validation failed"
+        print_error "Storage directory validation failed" >&2
         exit 1
     fi
     
+    # Only echo the path (to stdout for capture)
     echo "$storage_path"
 }
 
