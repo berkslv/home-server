@@ -284,42 +284,66 @@ store_secret() {
 configure_deployment() {
     print_header "Deployment Configuration"
     
+    # Check if this is a fresh install or re-run
+    local is_fresh_install=true
+    if [ -f "$CONFIG_FILE" ] && [ -f "$SECRETS_DIR/db_password" ]; then
+        is_fresh_install=false
+        print_info "Existing installation detected"
+    fi
+    
     # Get storage path
-    STORAGE_PATH=$(get_storage_path)
+    if [ "$is_fresh_install" = true ]; then
+        STORAGE_PATH=$(get_storage_path)
+    else
+        # Read from existing config
+        STORAGE_PATH=$(jq -r '.storage_path' "$CONFIG_FILE")
+        print_info "Using existing storage path: $STORAGE_PATH"
+    fi
     
     # Tailscale Auth Key
     print_header "Tailscale Configuration"
     
-    # Check if auth key provided via environment variable
-    if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
-        print_info "Using Tailscale Auth Key from environment variable"
+    # Check if secret already exists
+    if [ -f "$SECRETS_DIR/tailscale_auth_key" ] && [ "$is_fresh_install" = false ]; then
+        print_info "Using existing Tailscale auth key"
+        TAILSCALE_AUTH_KEY=$(cat "$SECRETS_DIR/tailscale_auth_key")
     else
-        echo "To get your Tailscale auth key:"
-        echo "  1. Go to https://login.tailscale.com/admin/settings/keys"
-        echo "  2. Click 'Generate auth key'"
-        echo "  3. Optional: Enable 'Reusable' and set expiration"
-        echo "  4. Copy the auth key (starts with tskey-auth-)"
-        echo
-        
-        if [ "$AUTO_YES" = true ]; then
-            print_error "Tailscale Auth Key required in non-interactive mode"
-            print_info "Set TAILSCALE_AUTH_KEY environment variable or run without -y flag"
-            exit 1
+        # Check if auth key provided via environment variable
+        if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
+            print_info "Using Tailscale Auth Key from environment variable"
+        else
+            echo "To get your Tailscale auth key:"
+            echo "  1. Go to https://login.tailscale.com/admin/settings/keys"
+            echo "  2. Click 'Generate auth key'"
+            echo "  3. Optional: Enable 'Reusable' and set expiration"
+            echo "  4. Copy the auth key (starts with tskey-auth-)"
+            echo
+            
+            if [ "$AUTO_YES" = true ]; then
+                print_error "Tailscale Auth Key required in non-interactive mode"
+                print_info "Set TAILSCALE_AUTH_KEY environment variable or run without -y flag"
+                exit 1
+            fi
+            
+            read -sp "Enter Tailscale Auth Key: " TAILSCALE_AUTH_KEY
+            echo
         fi
         
-        read -sp "Enter Tailscale Auth Key: " TAILSCALE_AUTH_KEY
-        echo
+        if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+            print_error "Tailscale Auth Key is required"
+            exit 1
+        fi
     fi
     
-    if [ -z "$TAILSCALE_AUTH_KEY" ]; then
-        print_error "Tailscale Auth Key is required"
-        exit 1
-    fi
-    
-    # Generate database password
+    # Generate or reuse database password
     print_header "Generating Credentials"
-    DB_PASSWORD=$(generate_password)
-    print_success "PostgreSQL password generated"
+    if [ -f "$SECRETS_DIR/db_password" ] && [ "$is_fresh_install" = false ]; then
+        DB_PASSWORD=$(cat "$SECRETS_DIR/db_password")
+        print_info "Using existing PostgreSQL password"
+    else
+        DB_PASSWORD=$(generate_password)
+        print_success "PostgreSQL password generated"
+    fi
     
     # Store secrets
     print_info "Storing credentials securely..."
@@ -396,9 +420,15 @@ download_compose_file() {
             cp docker-compose.yml "$COMPOSE_FILE"
             print_success "Copied docker-compose.yml from current directory"
         else
-            print_error "docker-compose.yml not found"
-            print_info "Please ensure docker-compose.yml is in the current directory or at $COMPOSE_FILE"
-            exit 1
+            # Download from GitHub
+            print_info "Downloading from GitHub repository..."
+            if curl -fsSL "https://raw.githubusercontent.com/berkslv/home-server/main/docker-compose.yml" -o "$COMPOSE_FILE"; then
+                print_success "Downloaded docker-compose.yml from GitHub"
+            else
+                print_error "Failed to download docker-compose.yml"
+                print_info "Please check your internet connection or manually place docker-compose.yml at $COMPOSE_FILE"
+                exit 1
+            fi
         fi
     else
         print_success "Using existing docker-compose.yml"
