@@ -379,7 +379,7 @@ configure_deployment() {
   "services": {
     "immich": {
       "enabled": true,
-      "ml_enabled": true
+      "ml_enabled": false
     },
     "portainer": {
       "enabled": true

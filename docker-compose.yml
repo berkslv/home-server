@@ -158,47 +158,12 @@ services:
       retries: 3
       start_period: 60s
 
-  # Immich Machine Learning - AI features
-  immich-machine-learning:
-    image: ghcr.io/immich-app/immich-machine-learning:release
-    container_name: immich-machine-learning
-    restart: always
-    volumes:
-      - model-cache:/cache
-    environment:
-      DB_HOSTNAME: immich-postgres
-      DB_USERNAME: postgres
-      DB_PASSWORD_FILE: /run/secrets/db_password
-      DB_DATABASE_NAME: immich
-      REDIS_HOSTNAME: immich-redis
-      LOG_LEVEL: log
-    secrets:
-      - db_password
-    depends_on:
-      immich-postgres:
-        condition: service_healthy
-      immich-redis:
-        condition: service_healthy
-    networks:
-      - home-server
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3003/ping || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-
 networks:
   home-server:
     driver: bridge
 
 volumes:
   portainer_data:
-  model-cache:
   tailscale_state:
 
 secrets:
