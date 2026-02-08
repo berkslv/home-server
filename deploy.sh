@@ -295,9 +295,13 @@ configure_deployment() {
     if [ "$is_fresh_install" = true ]; then
         STORAGE_PATH=$(get_storage_path)
     else
-        # Read from existing config
-        STORAGE_PATH=$(jq -r '.storage_path' "$CONFIG_FILE")
-        print_info "Using existing storage path: $STORAGE_PATH"
+        # Read from existing config with error handling
+        if STORAGE_PATH=$(jq -r '.storage_path // empty' "$CONFIG_FILE" 2>/dev/null) && [ -n "$STORAGE_PATH" ]; then
+            print_info "Using existing storage path: $STORAGE_PATH"
+        else
+            print_warning "Could not read storage path from config, re-prompting"
+            STORAGE_PATH=$(get_storage_path)
+        fi
     fi
     
     # Tailscale Auth Key
@@ -352,10 +356,11 @@ configure_deployment() {
     
     # Save configuration
     mkdir -p "$CONFIG_DIR"
+    local deployment_date=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     cat > "$CONFIG_FILE" <<EOF
 {
   "storage_path": "$STORAGE_PATH",
-  "deployment_date": "$(date -Iseconds)",
+  "deployment_date": "$deployment_date",
   "version": "1.0",
   "services": {
     "immich": {
