@@ -287,32 +287,32 @@ configure_deployment() {
     # Get storage path
     STORAGE_PATH=$(get_storage_path)
     
-    # Cloudflare Tunnel Token
-    print_header "Cloudflare Tunnel Configuration"
+    # Tailscale Auth Key
+    print_header "Tailscale Configuration"
     
-    # Check if token provided via environment variable
-    if [ -n "${CF_TUNNEL_TOKEN:-}" ]; then
-        print_info "Using Cloudflare Tunnel Token from environment variable"
+    # Check if auth key provided via environment variable
+    if [ -n "${TAILSCALE_AUTH_KEY:-}" ]; then
+        print_info "Using Tailscale Auth Key from environment variable"
     else
-        echo "To get your tunnel token:"
-        echo "  1. Go to https://one.dash.cloudflare.com/"
-        echo "  2. Navigate to Networks > Tunnels"
-        echo "  3. Create a new tunnel or select existing one"
-        echo "  4. Copy the tunnel token"
+        echo "To get your Tailscale auth key:"
+        echo "  1. Go to https://login.tailscale.com/admin/settings/keys"
+        echo "  2. Click 'Generate auth key'"
+        echo "  3. Optional: Enable 'Reusable' and set expiration"
+        echo "  4. Copy the auth key (starts with tskey-auth-)"
         echo
         
         if [ "$AUTO_YES" = true ]; then
-            print_error "Cloudflare Tunnel Token required in non-interactive mode"
-            print_info "Set CF_TUNNEL_TOKEN environment variable or run without -y flag"
+            print_error "Tailscale Auth Key required in non-interactive mode"
+            print_info "Set TAILSCALE_AUTH_KEY environment variable or run without -y flag"
             exit 1
         fi
         
-        read -sp "Enter Cloudflare Tunnel Token: " CF_TUNNEL_TOKEN
+        read -sp "Enter Tailscale Auth Key: " TAILSCALE_AUTH_KEY
         echo
     fi
     
-    if [ -z "$CF_TUNNEL_TOKEN" ]; then
-        print_error "Cloudflare Tunnel Token is required"
+    if [ -z "$TAILSCALE_AUTH_KEY" ]; then
+        print_error "Tailscale Auth Key is required"
         exit 1
     fi
     
@@ -323,7 +323,7 @@ configure_deployment() {
     
     # Store secrets
     print_info "Storing credentials securely..."
-    store_secret "cf_tunnel_token" "$CF_TUNNEL_TOKEN"
+    store_secret "tailscale_auth_key" "$TAILSCALE_AUTH_KEY"
     store_secret "db_password" "$DB_PASSWORD"
     
     # Save configuration
@@ -344,7 +344,7 @@ configure_deployment() {
     "glances": {
       "enabled": true
     },
-    "cloudflared": {
+    "tailscale": {
       "enabled": true
     }
   }
@@ -445,12 +445,19 @@ show_summary() {
     echo -e "${BLUE}Glances (System Monitoring)${NC}"
     echo "  URL: http://$SERVER_IP:61208"
     echo
+    echo -e "${BLUE}Tailscale${NC}"
+    echo "  Access via Tailscale network at: http://home-server:2283 (Immich)"
+    echo "  View devices: https://login.tailscale.com/admin/machines"
+    echo
     echo "========================================"
     echo "  Generated Credentials"
     echo "========================================"
     echo
     echo -e "${YELLOW}PostgreSQL Database Password:${NC}"
     echo "  $DB_PASSWORD"
+    echo
+    echo -e "${YELLOW}Tailscale Auth Key:${NC}"
+    echo "  Stored securely (not displayed for security)"
     echo
     echo -e "${YELLOW}IMPORTANT: Save these credentials securely!${NC}"
     echo "Credentials are stored in: $SECRETS_DIR"

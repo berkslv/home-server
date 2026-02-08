@@ -1,23 +1,27 @@
 version: '3.8'
 
 services:
-  # Cloudflare Tunnel - Secure remote access
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared
+  # Tailscale - Secure remote access
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    hostname: home-server
     restart: unless-stopped
-    command: tunnel run
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale_state:/var/lib/tailscale
     environment:
-      - TUNNEL_TOKEN_FILE=/run/secrets/cf_tunnel_token
+      - TS_AUTH_KEY_FILE=/run/secrets/tailscale_auth_key
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
     secrets:
-      - cf_tunnel_token
+      - tailscale_auth_key
     networks:
       - home-server
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "--timeout=2", "http://localhost:2000/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Portainer - Docker management UI
   portainer:
@@ -170,9 +174,10 @@ networks:
 volumes:
   portainer_data:
   model-cache:
+  tailscale_state:
 
 secrets:
   db_password:
     file: /opt/home-server/secrets/db_password
-  cf_tunnel_token:
-    file: /opt/home-server/secrets/cf_tunnel_token
+  tailscale_auth_key:
+    file: /opt/home-server/secrets/tailscale_auth_key

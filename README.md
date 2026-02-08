@@ -1,13 +1,13 @@
 # Home Server
 
-Docker-based home server featuring Immich (photo management with ML), Portainer (container management), Glances (system monitoring), and Cloudflare Tunnel (secure remote access).
+Docker-based home server featuring Immich (photo management with ML), Portainer (container management), Glances (system monitoring), and Tailscale (secure remote access).
 
 ## Features
 
 - **Immich** - Self-hosted photo/video management with machine learning
 - **Portainer** - Docker management web UI
 - **Glances** - Real-time system monitoring
-- **Cloudflare Tunnel** - Secure remote access without port forwarding
+- **Tailscale** - Zero-config VPN for secure remote access
 - **One-Command Deployment** - Automated setup with credential generation
 
 ## Quick Start
@@ -17,7 +17,7 @@ Docker-based home server featuring Immich (photo management with ML), Portainer 
 - Ubuntu/Raspberry Pi OS (64-bit)
 - 4GB+ RAM (8GB recommended)
 - 20GB+ available storage
-- [Cloudflare Tunnel Token](https://one.dash.cloudflare.com/) (Networks > Tunnels)
+- [Tailscale Auth Key](https://login.tailscale.com/admin/settings/keys) (Generate reusable key)
 
 ### Deploy
 
@@ -36,8 +36,8 @@ sudo bash deploy.sh
 # Interactive mode
 wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo bash
 
-# Non-interactive (set CF_TUNNEL_TOKEN first)
-export CF_TUNNEL_TOKEN="your-token"
+# Non-interactive (set TAILSCALE_AUTH_KEY first)
+export TAILSCALE_AUTH_KEY="tskey-auth-xxx"
 wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo -E bash -s -- -y
 ```
 
@@ -45,9 +45,15 @@ wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh |
 
 After deployment:
 
+**Local access:**
 - **Immich**: `http://localhost:2283`
 - **Portainer**: `https://localhost:9443`
 - **Glances**: `http://localhost:61208`
+
+**Remote access via Tailscale:**
+- **Immich**: `http://home-server:2283`
+- **Portainer**: `https://home-server:9443`
+- **Glances**: `http://home-server:61208`
 
 Create admin accounts on first login.
 
@@ -116,10 +122,10 @@ Clean up:
 # Exit container (Ctrl+D)
 
 # Remove containers
-docker rm -f cloudflared portainer glances immich-server immich-machine-learning immich-postgres immich-redis
+docker rm -f tailscale portainer glances immich-server immich-machine-learning immich-postgres immich-redis
 
 # Remove volumes
-docker volume rm portainer_data model-cache
+docker volume rm portainer_data model-cache tailscale_state
 ```
 
 ## Troubleshooting
