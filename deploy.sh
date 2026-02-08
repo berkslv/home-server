@@ -361,7 +361,7 @@ configure_deployment() {
   "services": {
     "immich": {
       "enabled": true,
-      "ml_enabled": false
+      "ml_enabled": true
     },
     "portainer": {
       "enabled": true
@@ -496,7 +496,6 @@ show_summary() {
     echo "  Restart services: cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose restart"
     echo "  Stop services:    cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose down"
     echo "  Update services:  cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose pull && docker compose up -d"
-    echo "  Run backup:       /opt/home-server/scripts/backup.sh"
     echo
     echo "Configuration: $CONFIG_FILE"
     echo "Docker Compose: $COMPOSE_FILE"
