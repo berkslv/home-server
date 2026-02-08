@@ -201,36 +201,29 @@ preflight_checks() {
     fi
 }
 
-# Validate external drive
-validate_external_drive() {
-    local drive_path="$1"
+# Validate storage directory
+validate_storage_directory() {
+    local dir_path="$1"
     
-    print_info "Validating external drive: $drive_path"
+    print_info "Validating storage directory: $dir_path"
     
-    # Check if path exists
-    if [ ! -d "$drive_path" ]; then
-        print_error "Path does not exist: $drive_path"
-        return 1
-    fi
-    
-    # Check if mounted
-    if ! mountpoint -q "$drive_path" 2>/dev/null; then
-        print_error "$drive_path is not a mount point"
-        print_info "Make sure your external SSD is mounted before running this script"
-        return 1
+    # Create directory if it doesn't exist
+    if [ ! -d "$dir_path" ]; then
+        print_info "Creating directory: $dir_path"
+        mkdir -p "$dir_path"
     fi
     
     # Check if writable
-    if ! touch "$drive_path/.write_test" 2>/dev/null; then
-        print_error "$drive_path is not writable"
+    if ! touch "$dir_path/.write_test" 2>/dev/null; then
+        print_error "$dir_path is not writable"
         return 1
     fi
-    rm -f "$drive_path/.write_test"
+    rm -f "$dir_path/.write_test"
     
     # Check available space (at least 20GB)
-    local available=$(df -BG "$drive_path" | awk 'NR==2 {print $4}' | sed 's/G//')
+    local available=$(df -BG "$dir_path" | awk 'NR==2 {print $4}' | sed 's/G//')
     if [ "$available" -lt 20 ]; then
-        print_warning "Less than 20GB available on $drive_path (${available}GB free)"
+        print_warning "Less than 20GB available on $dir_path (${available}GB free)"
         if ! prompt_continue "Continue anyway?"; then
             return 1
         fi
@@ -241,49 +234,31 @@ validate_external_drive() {
     return 0
 }
 
-# Suggest and prompt for external drive path
-get_external_drive_path() {
-    print_header "External Storage Configuration"
+# Get storage path for data
+get_storage_path() {
+    print_header "Storage Configuration"
     
-    print_info "Detecting mounted drives..."
+    local default_path="/var/lib/home-server"
+    
+    print_info "Data will be stored locally on your SSD"
+    echo "Recommended path: $default_path"
     echo
-    echo "Suggested mount points:"
-    
-    # List potential mount points
-    local suggestions=()
-    local current_user="${SUDO_USER:-root}"
-    for mount in /mnt/* /media/*/* /media/$current_user/*; do
-        if mountpoint -q "$mount" 2>/dev/null; then
-            local size=$(df -BG "$mount" | awk 'NR==2 {print $2}' | sed 's/G//')
-            local avail=$(df -BG "$mount" | awk 'NR==2 {print $4}' | sed 's/G//')
-            echo "  - $mount (Size: ${size}GB, Available: ${avail}GB)"
-            suggestions+=("$mount")
-        fi
-    done
-    
-    if [ ${#suggestions[@]} -eq 0 ]; then
-        print_warning "No external drives detected"
-        echo "Common mount points: /mnt/external-ssd, /media/usb0, /mnt/usb"
-    fi
-    
-    echo
-    local default_path="/mnt/external-ssd"
     
     if [ "$AUTO_YES" = true ]; then
-        external_drive="$default_path"
-        print_info "Auto-accepting default path: $external_drive"
+        storage_path="$default_path"
+        print_info "Using default path: $storage_path"
     else
-        read -p "Enter external SSD mount path [$default_path]: " external_drive
-        external_drive=${external_drive:-$default_path}
+        read -p "Enter storage path [$default_path]: " storage_path
+        storage_path=${storage_path:-$default_path}
     fi
     
     # Validate
-    if ! validate_external_drive "$external_drive"; then
-        print_error "External drive validation failed"
+    if ! validate_storage_directory "$storage_path"; then
+        print_error "Storage directory validation failed"
         exit 1
     fi
     
-    echo "$external_drive"
+    echo "$storage_path"
 }
 
 # Generate random password
@@ -309,8 +284,8 @@ store_secret() {
 configure_deployment() {
     print_header "Deployment Configuration"
     
-    # Get external drive path
-    EXTERNAL_DRIVE=$(get_external_drive_path)
+    # Get storage path
+    STORAGE_PATH=$(get_storage_path)
     
     # Cloudflare Tunnel Token
     print_header "Cloudflare Tunnel Configuration"
@@ -355,7 +330,7 @@ configure_deployment() {
     mkdir -p "$CONFIG_DIR"
     cat > "$CONFIG_FILE" <<EOF
 {
-  "external_drive": "$EXTERNAL_DRIVE",
+  "storage_path": "$STORAGE_PATH",
   "deployment_date": "$(date -Iseconds)",
   "version": "1.0",
   "services": {
@@ -379,34 +354,34 @@ EOF
     print_success "Configuration saved to $CONFIG_FILE"
 }
 
-# Setup external drive directories
+# Setup storage directories
 setup_directories() {
     print_header "Setting Up Directories"
     
-    print_info "Creating directory structure on external drive..."
+    print_info "Creating directory structure..."
     
     # Immich directories
-    mkdir -p "$EXTERNAL_DRIVE/immich/upload"
-    mkdir -p "$EXTERNAL_DRIVE/immich/postgres"
-    mkdir -p "$EXTERNAL_DRIVE/backups"
+    mkdir -p "$STORAGE_PATH/immich/upload"
+    mkdir -p "$STORAGE_PATH/immich/postgres"
+    mkdir -p "$STORAGE_PATH/backups"
     
     # Set permissions
     # Immich upload directory (user 1000)
-    chown -R 1000:1000 "$EXTERNAL_DRIVE/immich/upload"
-    chmod -R 755 "$EXTERNAL_DRIVE/immich/upload"
+    chown -R 1000:1000 "$STORAGE_PATH/immich/upload"
+    chmod -R 755 "$STORAGE_PATH/immich/upload"
     
     # PostgreSQL directory (user 999 - postgres user in container)
-    chown -R 999:999 "$EXTERNAL_DRIVE/immich/postgres"
-    chmod -R 700 "$EXTERNAL_DRIVE/immich/postgres"
+    chown -R 999:999 "$STORAGE_PATH/immich/postgres"
+    chmod -R 700 "$STORAGE_PATH/immich/postgres"
     
     # Backups directory
-    chown -R 1000:1000 "$EXTERNAL_DRIVE/backups"
-    chmod -R 755 "$EXTERNAL_DRIVE/backups"
+    chown -R 1000:1000 "$STORAGE_PATH/backups"
+    chmod -R 755 "$STORAGE_PATH/backups"
     
     print_success "Directory structure created"
-    echo "  - $EXTERNAL_DRIVE/immich/upload"
-    echo "  - $EXTERNAL_DRIVE/immich/postgres"
-    echo "  - $EXTERNAL_DRIVE/backups"
+    echo "  - $STORAGE_PATH/immich/upload"
+    echo "  - $STORAGE_PATH/immich/postgres"
+    echo "  - $STORAGE_PATH/backups"
 }
 
 # Download docker-compose.yml if not present
@@ -438,10 +413,10 @@ deploy_services() {
     
     print_info "Pulling Docker images (this may take a while)..."
     cd "$CONFIG_DIR"
-    EXTERNAL_DRIVE="$EXTERNAL_DRIVE" docker compose pull
+    EXTERNAL_DRIVE="$STORAGE_PATH" docker compose pull
     
     print_info "Starting services..."
-    EXTERNAL_DRIVE="$EXTERNAL_DRIVE" docker compose up -d
+    EXTERNAL_DRIVE="$STORAGE_PATH" docker compose up -d
     
     print_success "All services started"
 }
@@ -484,18 +459,18 @@ show_summary() {
     echo "  Storage Locations"
     echo "========================================"
     echo
-    echo "  Photos: $EXTERNAL_DRIVE/immich/upload"
-    echo "  Database: $EXTERNAL_DRIVE/immich/postgres"
-    echo "  Backups: $EXTERNAL_DRIVE/backups"
+    echo "  Photos: $STORAGE_PATH/immich/upload"
+    echo "  Database: $STORAGE_PATH/immich/postgres"
+    echo "  Backups: $STORAGE_PATH/backups"
     echo
-    echo "========================================"
+    echo "======================================="
     echo "  Useful Commands"
-    echo "========================================"
+    echo "======================================="
     echo
     echo "  View logs:        cd $CONFIG_DIR && docker compose logs -f"
-    echo "  Restart services: cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose restart"
-    echo "  Stop services:    cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose down"
-    echo "  Update services:  cd $CONFIG_DIR && EXTERNAL_DRIVE=$EXTERNAL_DRIVE docker compose pull && docker compose up -d"
+    echo "  Restart services: cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose restart"
+    echo "  Stop services:    cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose down"
+    echo "  Update services:  cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose pull && docker compose up -d"
     echo
     echo "Configuration: $CONFIG_FILE"
     echo "Docker Compose: $COMPOSE_FILE"
