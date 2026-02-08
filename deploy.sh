@@ -50,7 +50,7 @@ print_header() {
 prompt_continue() {
     local message="${1:-Continue anyway?}"
     if [ "$AUTO_YES" = true ]; then
-        print_info "Auto-accepting: $message"
+        print_info "Auto-accepting: $message" >&2
         return 0
     fi
     read -p "$message [y/N]: " -n 1 -r
@@ -391,7 +391,7 @@ setup_directories() {
     
     print_info "Creating directory structure..."
     
-    # Immich directories
+    # Immich directories (already validated, just create subdirs)
     mkdir -p "$STORAGE_PATH/immich/upload"
     mkdir -p "$STORAGE_PATH/immich/postgres"
     mkdir -p "$STORAGE_PATH/backups"
@@ -410,9 +410,9 @@ setup_directories() {
     chmod -R 755 "$STORAGE_PATH/backups"
     
     print_success "Directory structure created"
-    echo "  - $STORAGE_PATH/immich/upload"
-    echo "  - $STORAGE_PATH/immich/postgres"
-    echo "  - $STORAGE_PATH/backups"
+    echo "  Photos: $STORAGE_PATH/immich/upload"
+    echo "  Database: $STORAGE_PATH/immich/postgres"
+    echo "  Backups: $STORAGE_PATH/backups"
 }
 
 # Download docker-compose.yml if not present
