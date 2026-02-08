@@ -445,61 +445,34 @@ setup_directories() {
     echo "  Backups: $STORAGE_PATH/backups"
 }
 
-# Download or update docker-compose.yml (idempotent - always ensures latest version)
+# Download or update docker-compose.yml (always fetches latest version)
 download_compose_file() {
     print_header "Setting Up Docker Compose"
     
-    local needs_update=false
-    local source_file=""
+    # Backup existing file if present
+    if [ -f "$COMPOSE_FILE" ]; then
+        cp "$COMPOSE_FILE" "$COMPOSE_FILE.backup.$(date +%Y%m%d%H%M%S)"
+        print_info "Backed up existing docker-compose.yml"
+    fi
     
     # Determine source: local file or GitHub
     if [ -f "docker-compose.yml" ]; then
-        source_file="docker-compose.yml"
-        print_info "Found local docker-compose.yml"
-    fi
-    
-    # Check if update is needed
-    if [ ! -f "$COMPOSE_FILE" ]; then
-        needs_update=true
-        print_info "No existing docker-compose.yml found"
-    elif [ -n "$source_file" ]; then
-        # Compare with local file if available
-        if ! diff -q "$source_file" "$COMPOSE_FILE" > /dev/null 2>&1; then
-            print_info "docker-compose.yml has changed"
-            needs_update=true
-        fi
-    fi
-    
-    if [ "$needs_update" = true ]; then
-        if [ -n "$source_file" ]; then
-            # Backup existing file if present
-            if [ -f "$COMPOSE_FILE" ]; then
-                cp "$COMPOSE_FILE" "$COMPOSE_FILE.backup.$(date +%Y%m%d%H%M%S)"
-                print_info "Backed up existing docker-compose.yml"
-            fi
-            cp "$source_file" "$COMPOSE_FILE"
-            print_success "Copied docker-compose.yml from current directory"
-        else
-            # Download from GitHub
-            print_info "Downloading from GitHub repository..."
-            local temp_file=$(mktemp)
-            if curl -fsSL "https://raw.githubusercontent.com/berkslv/home-server/main/docker-compose.yml" -o "$temp_file"; then
-                # Backup existing file if present
-                if [ -f "$COMPOSE_FILE" ]; then
-                    cp "$COMPOSE_FILE" "$COMPOSE_FILE.backup.$(date +%Y%m%d%H%M%S)"
-                    print_info "Backed up existing docker-compose.yml"
-                fi
-                mv "$temp_file" "$COMPOSE_FILE"
-                print_success "Downloaded docker-compose.yml from GitHub"
-            else
-                rm -f "$temp_file"
-                print_error "Failed to download docker-compose.yml"
-                print_info "Please check your internet connection or manually place docker-compose.yml at $COMPOSE_FILE"
-                exit 1
-            fi
-        fi
+        print_info "Copying docker-compose.yml from current directory"
+        cp "docker-compose.yml" "$COMPOSE_FILE"
+        print_success "Copied docker-compose.yml from current directory"
     else
-        print_success "docker-compose.yml is up to date"
+        # Download from GitHub
+        print_info "Downloading docker-compose.yml from GitHub repository..."
+        local temp_file=$(mktemp)
+        if curl -fsSL "https://raw.githubusercontent.com/berkslv/home-server/main/docker-compose.yml" -o "$temp_file"; then
+            mv "$temp_file" "$COMPOSE_FILE"
+            print_success "Downloaded docker-compose.yml from GitHub"
+        else
+            rm -f "$temp_file"
+            print_error "Failed to download docker-compose.yml"
+            print_info "Please check your internet connection or manually place docker-compose.yml at $COMPOSE_FILE"
+            exit 1
+        fi
     fi
     
     chmod 644 "$COMPOSE_FILE"
