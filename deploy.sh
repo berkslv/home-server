@@ -268,7 +268,7 @@ generate_password() {
     openssl rand -base64 24 | tr -d "=+/" | cut -c1-24
 }
 
-# Store secret securely
+# Store secret securely (only if changed or new)
 store_secret() {
     local secret_name="$1"
     local secret_value="$2"
@@ -276,8 +276,20 @@ store_secret() {
     mkdir -p "$SECRETS_DIR"
     chmod 700 "$SECRETS_DIR"
     
-    echo -n "$secret_value" > "$SECRETS_DIR/$secret_name"
-    chmod 600 "$SECRETS_DIR/$secret_name"
+    local secret_file="$SECRETS_DIR/$secret_name"
+    
+    # Check if secret already exists with same value (idempotency)
+    if [ -f "$secret_file" ]; then
+        local existing_value
+        existing_value=$(cat "$secret_file")
+        if [ "$existing_value" = "$secret_value" ]; then
+            print_info "Secret unchanged: $secret_name"
+            return 0
+        fi
+    fi
+    
+    echo -n "$secret_value" > "$secret_file"
+    chmod 600 "$secret_file"
     
     print_success "Stored secret: $secret_name"
 }
@@ -385,7 +397,7 @@ EOF
     print_success "Configuration saved to $CONFIG_FILE"
 }
 
-# Setup storage directories
+# Setup storage directories (idempotent - safe to run multiple times)
 setup_directories() {
     print_header "Setting Up Directories"
     
@@ -396,49 +408,98 @@ setup_directories() {
     mkdir -p "$STORAGE_PATH/immich/postgres"
     mkdir -p "$STORAGE_PATH/backups"
     
-    # Set permissions
+    # Set permissions only if directory is empty or newly created
+    # This prevents permission issues with existing data
+    
     # Immich upload directory (user 1000)
-    chown -R 1000:1000 "$STORAGE_PATH/immich/upload"
-    chmod -R 755 "$STORAGE_PATH/immich/upload"
+    if [ -z "$(ls -A "$STORAGE_PATH/immich/upload" 2>/dev/null)" ]; then
+        chown -R 1000:1000 "$STORAGE_PATH/immich/upload"
+        chmod -R 755 "$STORAGE_PATH/immich/upload"
+        print_info "Set permissions for empty upload directory"
+    else
+        # Just ensure the directory itself has correct ownership
+        chown 1000:1000 "$STORAGE_PATH/immich/upload"
+        chmod 755 "$STORAGE_PATH/immich/upload"
+        print_info "Upload directory contains existing data, preserving permissions"
+    fi
     
     # PostgreSQL directory (user 999 - postgres user in container)
-    chown -R 999:999 "$STORAGE_PATH/immich/postgres"
-    chmod -R 700 "$STORAGE_PATH/immich/postgres"
+    if [ -z "$(ls -A "$STORAGE_PATH/immich/postgres" 2>/dev/null)" ]; then
+        chown -R 999:999 "$STORAGE_PATH/immich/postgres"
+        chmod -R 700 "$STORAGE_PATH/immich/postgres"
+        print_info "Set permissions for empty postgres directory"
+    else
+        # PostgreSQL data exists, don't change permissions recursively
+        chown 999:999 "$STORAGE_PATH/immich/postgres"
+        chmod 700 "$STORAGE_PATH/immich/postgres"
+        print_info "Postgres directory contains existing data, preserving permissions"
+    fi
     
     # Backups directory
-    chown -R 1000:1000 "$STORAGE_PATH/backups"
-    chmod -R 755 "$STORAGE_PATH/backups"
+    chown 1000:1000 "$STORAGE_PATH/backups"
+    chmod 755 "$STORAGE_PATH/backups"
     
-    print_success "Directory structure created"
+    print_success "Directory structure ready"
     echo "  Photos: $STORAGE_PATH/immich/upload"
     echo "  Database: $STORAGE_PATH/immich/postgres"
     echo "  Backups: $STORAGE_PATH/backups"
 }
 
-# Download docker-compose.yml if not present
+# Download or update docker-compose.yml (idempotent - always ensures latest version)
 download_compose_file() {
     print_header "Setting Up Docker Compose"
     
+    local needs_update=false
+    local source_file=""
+    
+    # Determine source: local file or GitHub
+    if [ -f "docker-compose.yml" ]; then
+        source_file="docker-compose.yml"
+        print_info "Found local docker-compose.yml"
+    fi
+    
+    # Check if update is needed
     if [ ! -f "$COMPOSE_FILE" ]; then
-        print_info "Downloading docker-compose.yml..."
-        
-        # Check if we're running from a local directory with docker-compose.yml
-        if [ -f "docker-compose.yml" ]; then
-            cp docker-compose.yml "$COMPOSE_FILE"
+        needs_update=true
+        print_info "No existing docker-compose.yml found"
+    elif [ -n "$source_file" ]; then
+        # Compare with local file if available
+        if ! diff -q "$source_file" "$COMPOSE_FILE" > /dev/null 2>&1; then
+            print_info "docker-compose.yml has changed"
+            needs_update=true
+        fi
+    fi
+    
+    if [ "$needs_update" = true ]; then
+        if [ -n "$source_file" ]; then
+            # Backup existing file if present
+            if [ -f "$COMPOSE_FILE" ]; then
+                cp "$COMPOSE_FILE" "$COMPOSE_FILE.backup.$(date +%Y%m%d%H%M%S)"
+                print_info "Backed up existing docker-compose.yml"
+            fi
+            cp "$source_file" "$COMPOSE_FILE"
             print_success "Copied docker-compose.yml from current directory"
         else
             # Download from GitHub
             print_info "Downloading from GitHub repository..."
-            if curl -fsSL "https://raw.githubusercontent.com/berkslv/home-server/main/docker-compose.yml" -o "$COMPOSE_FILE"; then
+            local temp_file=$(mktemp)
+            if curl -fsSL "https://raw.githubusercontent.com/berkslv/home-server/main/docker-compose.yml" -o "$temp_file"; then
+                # Backup existing file if present
+                if [ -f "$COMPOSE_FILE" ]; then
+                    cp "$COMPOSE_FILE" "$COMPOSE_FILE.backup.$(date +%Y%m%d%H%M%S)"
+                    print_info "Backed up existing docker-compose.yml"
+                fi
+                mv "$temp_file" "$COMPOSE_FILE"
                 print_success "Downloaded docker-compose.yml from GitHub"
             else
+                rm -f "$temp_file"
                 print_error "Failed to download docker-compose.yml"
                 print_info "Please check your internet connection or manually place docker-compose.yml at $COMPOSE_FILE"
                 exit 1
             fi
         fi
     else
-        print_success "Using existing docker-compose.yml"
+        print_success "docker-compose.yml is up to date"
     fi
     
     chmod 644 "$COMPOSE_FILE"
@@ -448,12 +509,33 @@ download_compose_file() {
 deploy_services() {
     print_header "Deploying Services"
     
-    print_info "Pulling Docker images (this may take a while)..."
     cd "$CONFIG_DIR"
-    EXTERNAL_DRIVE="$STORAGE_PATH" docker compose pull
+    
+    # Check if services are already running
+    if docker compose ps --quiet 2>/dev/null | grep -q .; then
+        print_info "Existing containers detected. Updating deployment..."
+    fi
+    
+    print_info "Pulling Docker images (this may take a while)..."
+    STORAGE_PATH="$STORAGE_PATH" docker compose pull
     
     print_info "Starting services..."
-    EXTERNAL_DRIVE="$STORAGE_PATH" docker compose up -d
+    # Use --remove-orphans for clean state, services will restart only if changed
+    STORAGE_PATH="$STORAGE_PATH" docker compose up -d --remove-orphans
+    
+    # Wait for services to be healthy
+    print_info "Waiting for services to become healthy..."
+    local max_wait=120
+    local waited=0
+    while [ $waited -lt $max_wait ]; do
+        local unhealthy=$(docker compose ps --format json 2>/dev/null | jq -r 'select(.Health == "unhealthy" or .Health == "starting") | .Name' | wc -l)
+        if [ "$unhealthy" -eq 0 ]; then
+            break
+        fi
+        sleep 5
+        waited=$((waited + 5))
+        print_info "Waiting for services... (${waited}s/${max_wait}s)"
+    done
     
     print_success "All services started"
 }
@@ -512,9 +594,9 @@ show_summary() {
     echo "======================================="
     echo
     echo "  View logs:        cd $CONFIG_DIR && docker compose logs -f"
-    echo "  Restart services: cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose restart"
-    echo "  Stop services:    cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose down"
-    echo "  Update services:  cd $CONFIG_DIR && EXTERNAL_DRIVE=$STORAGE_PATH docker compose pull && docker compose up -d"
+    echo "  Restart services: cd $CONFIG_DIR && STORAGE_PATH=$STORAGE_PATH docker compose restart"
+    echo "  Stop services:    cd $CONFIG_DIR && STORAGE_PATH=$STORAGE_PATH docker compose down"
+    echo "  Update services:  cd $CONFIG_DIR && STORAGE_PATH=$STORAGE_PATH docker compose pull && STORAGE_PATH=$STORAGE_PATH docker compose up -d"
     echo
     echo "Configuration: $CONFIG_FILE"
     echo "Docker Compose: $COMPOSE_FILE"

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Tailscale - Secure remote access
   tailscale:
@@ -22,6 +20,12 @@ services:
       - tailscale_auth_key
     networks:
       - home-server
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   # Portainer - Docker management UI
   portainer:
@@ -82,7 +86,7 @@ services:
       POSTGRES_DB: immich
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      - ${EXTERNAL_DRIVE}/immich/postgres:/var/lib/postgresql/data
+      - ${STORAGE_PATH}/immich/postgres:/var/lib/postgresql/data
     shm_size: 128mb
     secrets:
       - db_password
@@ -93,7 +97,11 @@ services:
         limits:
           memory: 1G
     healthcheck:
-      disable: false
+      test: ["CMD-SHELL", "pg_isready -U postgres -d immich"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   # Redis - Cache for Immich
   immich-redis:
@@ -107,7 +115,11 @@ services:
         limits:
           memory: 256M
     healthcheck:
-      test: redis-cli ping || exit 1
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # Immich Server - Main API server
   immich-server:
@@ -117,7 +129,7 @@ services:
     ports:
       - "2283:2283"
     volumes:
-      - ${EXTERNAL_DRIVE}/immich/upload:/data
+      - ${STORAGE_PATH}/immich/upload:/data
       - /etc/localtime:/etc/localtime:ro
     environment:
       DB_HOSTNAME: immich-postgres
@@ -140,7 +152,11 @@ services:
         limits:
           memory: 2G
     healthcheck:
-      disable: false
+      test: ["CMD-SHELL", "curl -f http://localhost:2283/api/server/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # Immich Machine Learning - AI features
   immich-machine-learning:
@@ -158,6 +174,11 @@ services:
       LOG_LEVEL: log
     secrets:
       - db_password
+    depends_on:
+      immich-postgres:
+        condition: service_healthy
+      immich-redis:
+        condition: service_healthy
     networks:
       - home-server
     deploy:
@@ -165,7 +186,11 @@ services:
         limits:
           memory: 2G
     healthcheck:
-      disable: false
+      test: ["CMD-SHELL", "curl -f http://localhost:3003/ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
 networks:
   home-server:
