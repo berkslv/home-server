@@ -1,165 +1,92 @@
 # Home Server
 
-Docker-based home server featuring Immich (photo management with ML), Portainer (container management), Glances (system monitoring), and Tailscale (secure remote access).
+Raspberry Pi (Ubuntu Server) running a Docker-based agent box, exposed through Cloudflare Tunnel and protected by Cloudflare Access.
 
-## Features
+```
+laptop ── cloudflared access ssh ──▶ Cloudflare Access (email OTP) ──▶ Tunnel ──▶ cloudflared (Pi) ──▶ agent:22
+```
 
-- **Immich** - Self-hosted photo/video management with machine learning
-- **Portainer** - Docker management web UI
-- **Glances** - Real-time system monitoring
-- **Tailscale** - Zero-config VPN for secure remote access
-- **One-Command Deployment** - Automated setup with credential generation
+- **cloudflared** – outbound-only tunnel connector; no ports are opened on the router.
+- **agent** – Ubuntu 24.04 with Node.js, Python/uv, gh, git, tmux, build tools and Claude Code. Passwordless sudo for user `agent`; `/home/agent` persists in a volume.
+- **ssh.berkslv.com** – SSH into the agent container, gated by an Access policy (email allowlist, one-time PIN). Also available as a browser terminal from the Access App Launcher.
 
-## Quick Start
+## Layout
 
-### Prerequisites
+```
+docker-compose.yml     cloudflared + agent
+agent/                 agent image (Dockerfile, sshd config, entrypoint)
+cloudflare/setup.sh    tunnel (wrangler), ingress, DNS, Access app + policy
+deploy.sh              bootstrap Docker on the Pi, rsync, compose up
+.env.example           TUNNEL_TOKEN, AUTHORIZED_KEYS, TZ
+```
 
-- Ubuntu/Raspberry Pi OS (64-bit)
-- 4GB+ RAM (8GB recommended)
-- 20GB+ available storage
-- [Tailscale Auth Key](https://login.tailscale.com/admin/settings/keys) (Generate reusable key)
+## Setup
 
-### Deploy
+### 1. Cloudflare
+
+Create an API token at https://dash.cloudflare.com/profile/api-tokens with:
+
+| Scope   | Permission                                            |
+|---------|-------------------------------------------------------|
+| Account | Cloudflare Tunnel: Edit                               |
+| Account | Access: Apps and Policies: Edit                       |
+| Account | Access: Organizations, Identity Providers, and Groups: Edit |
+| Account | Account Settings: Read                                |
+| Zone    | DNS: Edit, Zone: Read (berkslv.com)                   |
+
+Zero Trust must be enabled on the account once (dashboard → Zero Trust, pick a team name, free plan).
 
 ```bash
-# Clone repository
-git clone https://github.com/berkslv/home-server.git
-cd home-server
+npm i -g wrangler
+cp .env.example .env    # set AUTHORIZED_KEYS to your public key(s)
 
-# Run deployment
-sudo bash deploy.sh
+CLOUDFLARE_API_TOKEN=... ACCESS_EMAILS=you@example.com ./cloudflare/setup.sh
 ```
 
-### One-Liner Installation
+The script is idempotent. It creates the `home-server` tunnel with `wrangler tunnel create`, sets its ingress to `ssh://agent:22`, creates the `ssh` CNAME, the Access policy and app, and writes `TUNNEL_TOKEN` to `.env`.
+
+Optional variables: `DOMAIN`, `SSH_HOST`, `TUNNEL_NAME`, `SESSION_DURATION`, `CLOUDFLARE_ACCOUNT_ID`.
+
+### 2. Deploy to the Pi
 
 ```bash
-# Interactive mode
-wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo bash
-
-# Non-interactive (set TAILSCALE_AUTH_KEY first)
-export TAILSCALE_AUTH_KEY="tskey-auth-xxx"
-wget -qO- https://raw.githubusercontent.com/berkslv/home-server/main/deploy.sh | sudo -E bash -s -- -y
+PI=berkslv@192.168.1.111 ./deploy.sh
 ```
 
-## Access Services
+Installs Docker if missing, syncs this directory to `/opt/home-server` and runs `docker compose up -d --build`.
 
-After deployment:
-
-**Local access:**
-- **Immich**: `http://localhost:2283`
-- **Portainer**: `https://localhost:9443`
-- **Glances**: `http://localhost:61208`
-
-**Remote access via Tailscale:**
-- **Immich**: `http://home-server:2283`
-- **Portainer**: `https://home-server:9443`
-- **Glances**: `http://home-server:61208`
-
-Create admin accounts on first login.
-
-## Management
+### 3. Connect
 
 ```bash
-cd /opt/home-server
-
-# View logs
-docker compose logs -f
-
-# Restart services
-EXTERNAL_DRIVE=/var/lib/home-server docker compose restart
-
-# Update services
-EXTERNAL_DRIVE=/var/lib/home-server docker compose pull
-EXTERNAL_DRIVE=/var/lib/home-server docker compose up -d
-
-# Stop all
-EXTERNAL_DRIVE=/var/lib/home-server docker compose down
+brew install cloudflared
 ```
 
-## Storage Locations
+`~/.ssh/config`:
 
 ```
-/var/lib/home-server/
-├── immich/upload/    # Photos and videos
-├── immich/postgres/  # Database
-└── backups/          # Backups
+Host ssh.berkslv.com
+  User agent
+  ProxyCommand cloudflared access ssh --hostname %h
 ```
-
-Configuration and secrets: `/opt/home-server/`
-
-## Testing Locally
-
-Test with Docker:
 
 ```bash
-# Run Ubuntu container
-docker run -it --rm --privileged \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v $(pwd):/workspace \
-  ubuntu:22.04 bash
-
-# Inside container
-cd /workspace
-bash deploy.sh
+ssh ssh.berkslv.com
 ```
 
-Verify deployment:
+The first connection opens a browser for the Access login (email one-time PIN).
 
-```bash
-# Check containers
-docker ps
-
-# View logs
-cd /opt/home-server && docker compose logs
-
-# Check config
-cat /opt/home-server/config.json
-```
-
-Clean up:
-
-```bash
-# Exit container (Ctrl+D)
-
-# Remove containers
-docker rm -f tailscale portainer glances immich-server immich-machine-learning immich-postgres immich-redis
-
-# Remove volumes
-docker volume rm portainer_data model-cache tailscale_state
-```
-
-## Troubleshooting
-
-**View logs:**
-```bash
-cd /opt/home-server
-docker compose logs -f [service-name]
-```
-
-**Check permissions:**
-```bash
-# Immich upload (should be 1000:1000)
-ls -la /var/lib/home-server/immich/upload
-
-# PostgreSQL (should be 999:999)
-ls -la /var/lib/home-server/immich/postgres
-```
-
-**Check resources:**
-```bash
-docker stats
-free -h
-```
-
-## Uninstall
+## Management (on the Pi)
 
 ```bash
 cd /opt/home-server
-docker compose down -v
-sudo rm -rf /opt/home-server
-sudo rm -rf /var/lib/home-server  # Optional: removes all data
+sudo docker compose logs -f
+sudo docker compose up -d --build     # rebuild the agent image
+sudo docker compose pull cloudflared && sudo docker compose up -d
 ```
 
-## License
+Changing keys: edit `AUTHORIZED_KEYS` in `.env` and redeploy; the entrypoint rewrites `authorized_keys` on start.
 
-MIT
+## Notes
+
+- The agent container has no Docker socket. Mounting `/var/run/docker.sock` would give it root on the host.
+- For direct LAN access without Cloudflare, uncomment `ports: 2222:22` on the agent service.

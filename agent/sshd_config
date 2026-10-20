@@ -1,0 +1,9 @@
+HostKey /etc/ssh/keys/ssh_host_ed25519_key
+HostKey /etc/ssh/keys/ssh_host_rsa_key
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AllowUsers agent
+ClientAliveInterval 60
+ClientAliveCountMax 3
