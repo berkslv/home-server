@@ -17,6 +17,19 @@ printf '%s\n' "$AUTHORIZED_KEYS" > /home/agent/.ssh/authorized_keys
 chown agent:agent /home/agent/.ssh/authorized_keys
 chmod 600 /home/agent/.ssh/authorized_keys
 
+# GitHub: store GH_TOKEN in gh's config (SSH sessions don't inherit container env)
+as_agent() { runuser -u agent -- env -u GH_TOKEN HOME=/home/agent "$@"; }
+if [ -n "${GH_TOKEN:-}" ]; then
+    if printf '%s' "$GH_TOKEN" | as_agent gh auth login --hostname github.com --git-protocol https --with-token \
+        && as_agent gh auth setup-git --hostname github.com; then
+        echo "GitHub: authenticated as $(as_agent gh api user --jq .login 2>/dev/null || echo '?')"
+    else
+        echo "GitHub: login with GH_TOKEN failed, continuing without it" >&2
+    fi
+fi
+[ -z "${GIT_USER_NAME:-}" ] || as_agent git config --global user.name "$GIT_USER_NAME"
+[ -z "${GIT_USER_EMAIL:-}" ] || as_agent git config --global user.email "$GIT_USER_EMAIL"
+
 # Make the container env (TZ, etc.) visible to SSH sessions
 if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
     ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone

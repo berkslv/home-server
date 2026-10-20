@@ -86,6 +86,8 @@ sudo docker compose pull cloudflared && sudo docker compose up -d
 
 Changing keys: edit `AUTHORIZED_KEYS` in `.env` and redeploy; the entrypoint rewrites `authorized_keys` on start.
 
+GitHub: set `GH_TOKEN` (fine-grained PAT), `GIT_USER_NAME` and `GIT_USER_EMAIL` in `.env` and redeploy. The entrypoint logs `gh` in with the token and configures git to use it, so `gh` and `git push` work in SSH sessions and jobs. Rotate by replacing the token and redeploying.
+
 ## Notes
 
 - The agent container has no Docker socket. Mounting `/var/run/docker.sock` would give it root on the host.

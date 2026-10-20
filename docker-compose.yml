@@ -22,6 +22,9 @@ services:
     environment:
       - AUTHORIZED_KEYS=${AUTHORIZED_KEYS:?AUTHORIZED_KEYS is required}
       - TZ=${TZ:-Europe/Istanbul}
+      - GH_TOKEN=${GH_TOKEN:-}
+      - GIT_USER_NAME=${GIT_USER_NAME:-}
+      - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
     volumes:
       - agent_home:/home/agent
       - agent_ssh_keys:/etc/ssh/keys
