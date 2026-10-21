@@ -25,6 +25,15 @@ services:
       - GH_TOKEN=${GH_TOKEN:-}
       - GIT_USER_NAME=${GIT_USER_NAME:-}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
+      # agent-cron (scheduler starts only when JOBS_REPO is set)
+      - JOBS_REPO=${JOBS_REPO:-}
+      - JOBS_OWNER=${JOBS_OWNER:-}
+      - JOBS_MAX_CONCURRENT=${JOBS_MAX_CONCURRENT:-2}
+      - OPENCODE_MODEL=${OPENCODE_MODEL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - RESEND_FROM=${RESEND_FROM:-}
+      - NOTIFICATION_EMAIL=${NOTIFICATION_EMAIL:-}
     volumes:
       - agent_home:/home/agent
       - agent_ssh_keys:/etc/ssh/keys

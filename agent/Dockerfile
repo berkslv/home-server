@@ -1,6 +1,7 @@
 FROM ubuntu:24.04
 
 ARG NODE_MAJOR=24
+ARG OPENCODE_VERSION=1.19.3
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
@@ -21,10 +22,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && apt-get update && apt-get install -y --no-install-recommends nodejs gh \
     && rm -rf /var/lib/apt/lists/*
 
-# uv (Python) and Claude Code
+# uv (Python), Claude Code and opencode
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code opencode-ai@${OPENCODE_VERSION} \
     && npm cache clean --force
+
+# agent-cron: scheduled opencode jobs defined as GitHub issues
+COPY agent-cron/package.json agent-cron/package-lock.json /opt/agent-cron/
+RUN cd /opt/agent-cron && npm ci --omit=dev && npm cache clean --force
+COPY agent-cron/src /opt/agent-cron/src
+COPY agent-cron/agent-cron.sh /usr/local/bin/agent-cron
 
 # Non-root user (ubuntu image ships uid 1000 as "ubuntu"; replace it)
 RUN userdel -r ubuntu 2>/dev/null || true \
@@ -35,7 +42,7 @@ RUN userdel -r ubuntu 2>/dev/null || true \
 
 COPY sshd_config /etc/ssh/sshd_config.d/agent.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /run/sshd /etc/ssh/keys
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/agent-cron && mkdir -p /run/sshd /etc/ssh/keys
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

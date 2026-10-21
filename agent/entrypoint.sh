@@ -35,4 +35,22 @@ if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
     ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
 fi
 
+# agent-cron: settings file for the CLI (SSH sessions don't inherit container env),
+# then the scheduler in its own tmux server; each job run gets a window there
+if [ -n "${JOBS_REPO:-}" ]; then
+    install -d -m 700 -o agent -g agent /home/agent/.agent-cron
+    (
+        umask 077
+        for var in JOBS_REPO JOBS_OWNER JOBS_LABEL JOBS_MAX_CONCURRENT JOBS_SYNC_INTERVAL JOBS_COMMENT_POLL \
+                   OPENCODE_MODEL OPENROUTER_API_KEY RESEND_API_KEY RESEND_FROM NOTIFICATION_EMAIL TZ; do
+            [ -z "${!var:-}" ] || printf '%s=%q\n' "$var" "${!var}"
+        done > /home/agent/.agent-cron/env
+    )
+    chown agent:agent /home/agent/.agent-cron/env
+    as_agent tmux -L agent-cron new-session -d -s agent-cron -n scheduler \
+        "while true; do agent-cron daemon; echo 'scheduler exited, restarting in 10s'; sleep 10; done"
+    as_agent tmux -L agent-cron set-option -g history-limit 50000
+    echo "agent-cron: scheduler started (tmux -L agent-cron attach)"
+fi
+
 exec /usr/sbin/sshd -D -e
