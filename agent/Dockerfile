@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         openssh-server sudo ca-certificates curl wget gnupg \
         git jq vim nano tmux htop less unzip zip rsync \
         build-essential python3 python3-pip python3-venv \
-        ripgrep fd-find tree iputils-ping dnsutils procps tzdata locales \
+        libatomic1 ripgrep fd-find tree iputils-ping dnsutils procps tzdata locales \
     && ln -s /usr/bin/fdfind /usr/local/bin/fd \
     && rm -rf /var/lib/apt/lists/*
 
@@ -27,22 +27,20 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
     && npm install -g @anthropic-ai/claude-code opencode-ai@${OPENCODE_VERSION} \
     && npm cache clean --force
 
-# agent-cron: scheduled opencode jobs defined as GitHub issues
-COPY agent-cron/package.json agent-cron/package-lock.json /opt/agent-cron/
-RUN cd /opt/agent-cron && npm ci --omit=dev && npm cache clean --force
-COPY agent-cron/src /opt/agent-cron/src
-COPY agent-cron/agent-cron.sh /usr/local/bin/agent-cron
-
 # Non-root user (ubuntu image ships uid 1000 as "ubuntu"; replace it)
 RUN userdel -r ubuntu 2>/dev/null || true \
     && useradd -m -u 1000 -s /bin/bash agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
-    && chmod 440 /etc/sudoers.d/agent \
+    && chmod 440 /etc/sudoers.d/agent
+
+# Hermes Agent, installed as the agent user into ~/.hermes so the skel copy below seeds a fresh home volume with it
+RUN runuser -u agent -- env HOME=/home/agent \
+        bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser --skip-computer-use' \
     && cp -a /home/agent /opt/agent-skel
 
 COPY sshd_config /etc/ssh/sshd_config.d/agent.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/agent-cron && mkdir -p /run/sshd /etc/ssh/keys
+RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /run/sshd /etc/ssh/keys
 
 EXPOSE 22
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
