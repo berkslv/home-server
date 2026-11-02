@@ -33,9 +33,11 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 440 /etc/sudoers.d/agent
 
-# Hermes Agent, installed as the agent user into ~/.hermes so the skel copy below seeds a fresh home volume with it
+# Hermes Agent, installed as the agent user into ~/.hermes so the skel copy below seeds a fresh home volume with it.
+# The telegram extra is preinstalled: otherwise the gateway stops at an install prompt on first start.
 RUN runuser -u agent -- env HOME=/home/agent \
-        bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser --skip-computer-use' \
+        bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser --skip-computer-use \
+            && ~/.local/bin/hermes pm install --extra telegram </dev/null' \
     && cp -a /home/agent /opt/agent-skel
 
 COPY sshd_config /etc/ssh/sshd_config.d/agent.conf

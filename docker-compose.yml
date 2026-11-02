@@ -1,18 +1,7 @@
 services:
-  # Cloudflare Tunnel - outbound-only connector, no inbound ports on the router
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared
-    restart: unless-stopped
-    command: tunnel --no-autoupdate run
-    environment:
-      - TUNNEL_TOKEN=${TUNNEL_TOKEN:?TUNNEL_TOKEN is required, run cloudflare/setup.sh}
-    networks:
-      - home-server
-    depends_on:
-      - agent
-
-  # Agent - Ubuntu dev box with CLI tooling, reachable at ssh.berkslv.com
+  # Agent - Ubuntu dev box with CLI tooling. cloudflared runs on the host and
+  # tunnels ssh.berkslv.com to the host's sshd; the agent is one hop further:
+  # `ssh agent` (ProxyJump via ssh.berkslv.com, see README)
   agent:
     build: ./agent
     image: home-server/agent:latest
@@ -25,14 +14,15 @@ services:
       - GH_TOKEN=${GH_TOKEN:-}
       - GIT_USER_NAME=${GIT_USER_NAME:-}
       - GIT_USER_EMAIL=${GIT_USER_EMAIL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - VENICE_API_KEY=${VENICE_API_KEY:-}
     volumes:
       - agent_home:/home/agent
       - agent_ssh_keys:/etc/ssh/keys
-    # Uncomment for direct LAN access (bypasses Cloudflare Access)
-    # ports:
-    #   - "2222:22"
-    networks:
-      - home-server
+    # Host-only; reach it from the Pi with `ssh -p 2222 agent@localhost`
+    ports:
+      - "127.0.0.1:2222:22"
     deploy:
       resources:
         limits:
@@ -42,10 +32,6 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-
-networks:
-  home-server:
-    driver: bridge
 
 volumes:
   agent_home:

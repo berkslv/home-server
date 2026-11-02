@@ -61,14 +61,14 @@ fi
 log "Tunnel id $TUNNEL_ID"
 wrangler tunnel info "$TUNNEL_ID" >&2 || true
 
-# Remotely-managed ingress: ssh host -> agent container
+# Remotely-managed ingress: ssh host -> host sshd (cloudflared runs on the host)
 cf PUT "/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" "$(jq -nc --arg h "$SSH_HOST" '{
     config: { ingress: [
-        { hostname: $h, service: "ssh://agent:22" },
+        { hostname: $h, service: "ssh://localhost:22" },
         { service: "http_status:404" }
     ] }
 }')" >/dev/null
-log "Ingress: $SSH_HOST -> ssh://agent:22"
+log "Ingress: $SSH_HOST -> ssh://localhost:22"
 
 # DNS CNAME
 DNS_BODY=$(jq -nc --arg n "$SSH_HOST" --arg c "$TUNNEL_ID.cfargotunnel.com" \
@@ -103,7 +103,7 @@ log "Access policy $POLICY_ID allows: $ACCESS_EMAILS"
 
 # Access: application for the ssh host (type "ssh" also enables browser-rendered terminal)
 APP_BODY=$(jq -nc --arg h "$SSH_HOST" --arg p "$POLICY_ID" --arg s "$SESSION_DURATION" '{
-    name: "Agent SSH", domain: $h, type: "ssh", session_duration: $s,
+    name: "Home Server SSH", domain: $h, type: "ssh", session_duration: $s,
     app_launcher_visible: true,
     policies: [ { id: $p, precedence: 1 } ]
 }')
