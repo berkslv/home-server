@@ -1,7 +1,8 @@
 #!/bin/bash
 #
 # Host bootstrap, run on the Pi as root by deploy.sh. Idempotent.
-#   - Docker (Ubuntu packages) for the agent container
+#   - Docker (Ubuntu packages) for the agent and Immich containers
+#   - /opt/immich (root-only) with a generated DB password on first run
 #   - cloudflared as a systemd service, tunnel token from .env
 #   - AUTHORIZED_KEYS from .env -> host user's ~/.ssh/authorized_keys
 #
@@ -26,7 +27,22 @@ if ! command -v docker >/dev/null; then
     apt-get install -y docker.io docker-compose-v2 docker-buildx
 fi
 systemctl enable --now docker >/dev/null
-usermod -aG docker "$HOST_USER"
+# The docker group is root-equivalent and would expose /opt/immich; deploy uses sudo instead
+gpasswd -d "$HOST_USER" docker >/dev/null 2>&1 || true
+
+# Immich: data and secrets stay root-only, outside the rsync'd repo dir
+install -d -m 700 -o root -g root /opt/immich
+install -d -m 755 -o root -g root /opt/immich/library
+if [ ! -f /opt/immich/.env ]; then
+    log "Creating /opt/immich/.env with a new DB password"
+    (umask 077; cat > /opt/immich/.env <<EOF
+DB_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+DB_USERNAME=postgres
+DB_DATABASE_NAME=immich
+TZ=Europe/Istanbul
+EOF
+    )
+fi
 
 # cloudflared from Cloudflare's apt repo
 if ! command -v cloudflared >/dev/null; then
@@ -81,4 +97,4 @@ AllowUsers $HOST_USER
 EOF
 sshd -t
 systemctl reload ssh
-log "sshd: $(sshd -T | grep -E '^(passwordauthentication|permitrootlogin)' | tr '\n' ' ')"
+log "sshd: $(sshd -T | grep -iE '^(passwordauthentication|permitrootlogin)' | tr '\n' ' ')"

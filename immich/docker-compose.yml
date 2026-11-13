@@ -1,0 +1,78 @@
+# Immich photo library, from the official v3.4.1 release compose file:
+# https://github.com/immich-app/immich/releases/download/v3.4.1/docker-compose.yml
+#
+# Its own compose project ("immich"), separate from the agent stack. Data and
+# secrets stay outside the repo in /opt/immich (root:root 700), so neither the
+# host user nor the agent can read them and rsync --delete never touches them:
+#   /opt/immich/.env       DB_PASSWORD, DB_USERNAME, DB_DATABASE_NAME, TZ (created by host/setup.sh)
+#   /opt/immich/library    uploads, thumbs, encoded video, DB dumps (library/backups)
+#   /opt/immich/postgres   database
+#
+# Run from deploy.sh:
+#   sudo docker compose -f immich/docker-compose.yml --env-file /opt/immich/.env up -d
+#
+# Upgrading: read the release notes, bump the tags below together with the
+# postgres/valkey digests from that release's compose file, then redeploy.
+
+name: immich
+
+services:
+  immich-server:
+    container_name: immich_server
+    image: ghcr.io/immich-app/immich-server:v3.4.1
+    volumes:
+      - /opt/immich/library:/data
+      - /etc/localtime:/etc/localtime:ro
+    env_file:
+      - /opt/immich/.env
+    # LAN + host cloudflared (immich.berkslv.com). Use 127.0.0.1:2283:2283 to make the tunnel the only way in
+    ports:
+      - '2283:2283'
+    depends_on:
+      - redis
+      - database
+    restart: always
+    healthcheck:
+      disable: false
+
+  immich-machine-learning:
+    container_name: immich_machine_learning
+    image: ghcr.io/immich-app/immich-machine-learning:v3.4.1
+    # Keep ML from starving the Pi: at most 1 of 4 cores, lower priority than everything else
+    cpus: 1.0
+    cpu_shares: 256
+    volumes:
+      - model-cache:/cache
+    env_file:
+      - /opt/immich/.env
+    environment:
+      MACHINE_LEARNING_MODEL_REVISION: v2
+      MACHINE_LEARNING_REQUEST_THREADS: 1
+    restart: always
+    healthcheck:
+      disable: false
+
+  redis:
+    container_name: immich_redis
+    image: docker.io/valkey/valkey:9@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
+    healthcheck:
+      test: redis-cli ping | grep -q PONG || exit 1
+    restart: always
+
+  database:
+    container_name: immich_postgres
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?run with --env-file /opt/immich/.env}
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_DB: ${DB_DATABASE_NAME}
+      POSTGRES_INITDB_ARGS: '--data-checksums'
+    volumes:
+      - /opt/immich/postgres:/var/lib/postgresql/data
+    shm_size: 128mb
+    restart: always
+    healthcheck:
+      disable: false
+
+volumes:
+  model-cache:
