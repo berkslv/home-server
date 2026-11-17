@@ -1,0 +1,10 @@
+[Unit]
+Description=Immich backup to Cloudflare R2 (restic)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/immich-backup
+Nice=10
+IOSchedulingClass=idle

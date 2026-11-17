@@ -19,6 +19,8 @@ browser ────────────────────────
 docker-compose.yml     agent container
 agent/                 agent image (Dockerfile, sshd config, entrypoint)
 immich/                Immich compose project (server, ML, postgres, valkey)
+backup/                restic -> Cloudflare R2 backup script + systemd timer (installed by hand, see docs)
+docs/                  docs/immich-operations.md: Immich runbook, migration history, backup & restore
 host/setup.sh          on the Pi: Docker, cloudflared systemd service, host authorized_keys, /opt/immich
 cloudflare/setup.sh    tunnel (wrangler), ingress, DNS, Access app + policy
 deploy.sh              rsync to the Pi, run host/setup.sh, compose up
@@ -156,7 +158,7 @@ Upgrading: bump the image tags (and the postgres/valkey digests) in `immich/dock
 Limits:
 - The Immich mobile app can't do the Access email login, so `cloudflare/setup.sh` creates an Access service token (`immich-app`) allowed on the Immich app and writes it to `.env` as `IMMICH_ACCESS_CLIENT_ID` / `IMMICH_ACCESS_CLIENT_SECRET`. In the app: login screen → settings gear → Advanced → Custom proxy headers, add `CF-Access-Client-Id` and `CF-Access-Client-Secret` with those values. To rotate, delete `IMMICH_ACCESS_CLIENT_SECRET` from `.env`, re-run the script and update the app.
 - Cloudflare rejects request bodies over 100 MB on the free plan, so large videos and bulk imports (Google Takeout via `immich-go`) should go to `http://localhost:2283` on the Pi or the LAN URL.
-- The photos and their DB dumps are on the same SSD. There is no off-disk backup yet.
+- Off-site backup: nightly restic to Cloudflare R2 (03:00, keeps ~1 year). Setup, costs, restore and disaster recovery are in [docs/immich-operations.md](docs/immich-operations.md).
 
 ## Notes
 

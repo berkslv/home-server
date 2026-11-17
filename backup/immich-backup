@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Immich -> Cloudflare R2 backup with restic (root only).
+#   immich-backup            nightly run: backup, forget, (Sun) prune, (1st of month) check
+#   immich-backup restic ... run any restic command against the repo (snapshots, restore, ...)
+set -euo pipefail
+set -a; . /etc/restic/r2.env; set +a
+export RESTIC_REPOSITORY="s3:https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET}"
+export RESTIC_PASSWORD_FILE=/etc/restic/password
+export RESTIC_CACHE_DIR=/var/cache/restic
+LIMIT_UP=${LIMIT_UP:-1500}   # KiB/s, keeps the 20 Mbit uplink usable
+
+if [ "${1:-}" = restic ]; then shift; exec restic "$@"; fi
+
+LIB=/opt/immich/library
+log() { echo "[$(date "+%F %T")] $*"; }
+
+log "backup start"
+restic backup --limit-upload "$LIMIT_UP" --compression auto --tag immich \
+  --exclude-caches \
+  "$LIB/library" "$LIB/upload" "$LIB/backups" "$LIB/profile"
+log "backup done"
+
+restic forget --tag immich --keep-daily 7 --keep-weekly 4 --keep-monthly 12
+if [ "$(date +%u)" = 7 ]; then log "weekly prune"; restic prune --max-unused 10%; fi
+if [ "$(date +%d)" = 01 ]; then log "monthly check (5% of data)"; restic check --read-data-subset 5%; fi
+log "all done"
