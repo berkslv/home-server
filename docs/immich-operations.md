@@ -28,6 +28,8 @@ This file never contains secrets. Each one is listed by where it lives.
 | `/opt/immich/library/encoded-video/` | transcoded videos (~36 GB) | no, regenerable (~1 day of CPU) |
 | `/opt/immich/postgres/` | live database files | no. Use the dumps; copying a running DB is unsafe. |
 | `/etc/restic/` | R2 credentials and the restic password (root 600) | no. Keep the password in a password manager. |
+| `/etc/pi-health.env` | healthchecks.io ping URL (root 600) | no. It's shown in the healthchecks.io dashboard. |
+| `/var/lib/immich-backup/last-success` | epoch time of the last fully successful backup run, read by `pi-health` | no |
 
 Leftovers in `/opt/immich`, safe to delete: `docker-compose.yml` and `docker-compose.yml.bak` (the original standalone install, superseded by the repo's compose file), `import.sh`, `import-logs/`, `immich-go.env` (contains the import API key). The root tmux session `immich-import` is also a leftover.
 
@@ -100,6 +102,7 @@ Set up on 2026-11-17. Copies of the script and units are in `backup/` in this re
 2. `restic forget --keep-daily 7 --keep-weekly 4 --keep-monthly 12`, which keeps about **one year** of history.
 3. **Sundays:** `restic prune --max-unused 10%`.
 4. **On the 1st of each month:** `restic check --read-data-subset 5%`. R2 egress is free.
+5. Writes the current time to `/var/lib/immich-backup/last-success`, which `pi-health` uses to check the backup's age.
 
 ### Cost
 
@@ -196,3 +199,55 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
   - Check disk space with `df -h /`.
 - **Twice a year:** do a small restore test (§4).
 - **Temperature:** the Pi runs at 85 °C+ under transcoding and throttles itself. A fan case helps.
+
+---
+
+## 7. Monitoring: pi-health → healthchecks.io
+
+Set up on 2026-11-17. The files are in `health/` in this repo. Like the backup, it's installed by hand and not by `host/setup.sh`.
+
+**How it works.** `pi-health.timer` runs `/usr/local/sbin/pi-health` (as root) every hour and 5 minutes after boot. It reports to the healthchecks.io check **`pi-health`** (period 1 h, grace 30 min). Alerts go by email to the account address.
+
+- **Everything OK:** the script pings `$HC_URL`, and the report becomes the ping body (visible in the dashboard).
+- **Anything fails:** the script pings `$HC_URL/fail`. healthchecks.io emails **"DOWN"** with the report, then **"UP"** when it recovers. It only emails on changes, never every hour.
+- **No ping for 1 h 30 min:** the Pi is dead, offline or frozen, so healthchecks.io emails "DOWN". A monitor on the Pi alone couldn't catch this case.
+
+**What it checks:**
+
+| Check | Fails when |
+|---|---|
+| containers `immich_server`, `immich_machine_learning`, `immich_postgres`, `immich_redis`, `agent` | not running, or unhealthy |
+| Immich API `localhost:2283/api/server/ping` | no `pong` |
+| `cloudflared` service and `localhost:20241/ready` (tunnel connected to the edge) | inactive, or not ready |
+| public `https://immich.berkslv.com/api/server/ping`, using the Access service token from `/opt/home-server/.env` | no `pong` end to end |
+| disk `/` | 85% or more used |
+| memory | under 5% available |
+| CPU temperature | 80 °C or more. This can happen during heavy jobs, such as transcoding after an upgrade. |
+| kernel log | under-voltage in the last hour |
+| SSD SMART (`smartctl -H /dev/sda`) | not PASSED |
+| newest Immich DB dump | 26 h or older |
+| R2 backup | last run failed, `last-success` is 36 h or older, or the backup timer is inactive |
+
+The Mac ML server isn't checked; it's often off on purpose. The limits are at the top of the script.
+
+**Commands:**
+
+```bash
+sudo pi-health --dry-run                       # run all checks, print, don't ping
+sudo systemctl start pi-health.service         # run now and ping
+systemctl list-timers pi-health.timer
+sudo journalctl -u pi-health -n 30
+```
+
+**Install on a rebuilt host:**
+
+```bash
+sudo apt install --no-install-recommends smartmontools
+sudo install -m 700 /opt/home-server/health/pi-health /usr/local/sbin/
+sudo install -m 644 /opt/home-server/health/pi-health.{service,timer} /etc/systemd/system/
+sudoedit /etc/pi-health.env          # HC_URL=https://hc-ping.com/<uuid>   (from the healthchecks.io dashboard)
+sudo chmod 600 /etc/pi-health.env
+sudo systemctl daemon-reload && sudo systemctl enable --now pi-health.timer
+```
+
+**Planned downtime** (an upgrade, a move): pause the check in the healthchecks.io dashboard first, then resume it afterwards.

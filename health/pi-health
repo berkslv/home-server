@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Hourly health check of the Pi. Reports to healthchecks.io (dead man's switch):
+#   all OK  -> ping $HC_URL           with the report as body
+#   failure -> ping $HC_URL/fail      with the report as body (healthchecks.io emails)
+#   no ping at all for 1h30 (Pi down / offline) -> healthchecks.io emails
+# Usage: pi-health            run checks and ping
+#        pi-health --dry-run  run checks, print the report, don't ping
+set -uo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+. /etc/pi-health.env
+
+DISK_MAX=85            # % used on /
+TEMP_MAX=80            # °C
+MEM_MIN=5              # % available
+BACKUP_MAX_H=36        # hours since last successful R2 backup
+DUMP_MAX_H=26          # hours since last Immich DB dump
+CONTAINERS="immich_server immich_machine_learning immich_postgres immich_redis agent"
+PUBLIC_URL=https://immich.berkslv.com/api/server/ping
+ACCESS_ENV=/opt/home-server/.env    # IMMICH_ACCESS_CLIENT_ID / _SECRET (Access service token)
+
+fails=0; report=""
+ok()   { report+="OK    $*"$'\n'; }
+fail() { report+="FAIL  $*"$'\n'; fails=$((fails+1)); }
+now=$(date +%s)
+
+# --- containers
+for c in $CONTAINERS; do
+  st=$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "$c" 2>/dev/null) \
+    || { fail "container $c: missing"; continue; }
+  case "$st" in "running healthy"|"running -") ok "container $c: $st" ;; *) fail "container $c: $st" ;; esac
+done
+
+# --- Immich API (local)
+if [ "$(curl -s -m 10 http://localhost:2283/api/server/ping)" = '{"res":"pong"}' ]; then ok "immich api (local)"
+else fail "immich api (local): no pong"; fi
+
+# --- cloudflared + public URL end to end (edge -> Access -> tunnel -> Immich)
+systemctl is-active -q cloudflared && ok "cloudflared service" || fail "cloudflared service: $(systemctl is-active cloudflared)"
+code=$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://localhost:20241/ready)
+[ "$code" = 200 ] && ok "tunnel connected to edge" || fail "tunnel /ready: HTTP $code"
+id=$(grep -m1 '^IMMICH_ACCESS_CLIENT_ID=' "$ACCESS_ENV" 2>/dev/null | cut -d= -f2-)
+sec=$(grep -m1 '^IMMICH_ACCESS_CLIENT_SECRET=' "$ACCESS_ENV" 2>/dev/null | cut -d= -f2-)
+if [ -n "$id" ] && [ -n "$sec" ]; then
+  body=$(curl -s -m 20 --retry 2 -H "CF-Access-Client-Id: $id" -H "CF-Access-Client-Secret: $sec" "$PUBLIC_URL")
+  [ "$body" = '{"res":"pong"}' ] && ok "public url $PUBLIC_URL" || fail "public url: unexpected answer (${body:0:80})"
+else
+  fail "public url: Access service token not found in $ACCESS_ENV"
+fi
+
+# --- disk, memory, temperature, power, SSD
+disk=$(df --output=pcent / | tail -1 | tr -dc 0-9)
+[ "$disk" -lt "$DISK_MAX" ] && ok "disk / ${disk}%" || fail "disk / ${disk}% (limit ${DISK_MAX}%)"
+mem=$(awk '/MemTotal/{t=$2}/MemAvailable/{a=$2}END{printf "%d", a*100/t}' /proc/meminfo)
+[ "$mem" -ge "$MEM_MIN" ] && ok "memory ${mem}% available" || fail "memory only ${mem}% available"
+temp=$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))
+[ "$temp" -lt "$TEMP_MAX" ] && ok "cpu temp ${temp}°C" || fail "cpu temp ${temp}°C (limit ${TEMP_MAX}°C)"
+uv=$(journalctl -k --since "-1h" -q --no-pager 2>/dev/null | grep -ci 'under-voltage')
+[ "$uv" -eq 0 ] && ok "no under-voltage in last hour" || fail "under-voltage reported $uv times in last hour (power supply)"
+if smart=$(smartctl -H /dev/sda 2>&1); then ok "ssd smart: $(grep -o 'PASSED\|OK' <<<"$smart" | head -1)"
+else echo "$smart" | grep -q 'PASSED' && ok "ssd smart: PASSED (warnings)" || fail "ssd smart: $(tail -1 <<<"$smart")"; fi
+
+# --- backups
+dump=$(ls -1t /opt/immich/library/backups/immich-db-backup-*.sql.gz 2>/dev/null | head -1)
+if [ -n "$dump" ]; then
+  age=$(( (now - $(stat -c %Y "$dump")) / 3600 ))
+  [ "$age" -lt "$DUMP_MAX_H" ] && ok "immich db dump ${age}h old" || fail "immich db dump ${age}h old (limit ${DUMP_MAX_H}h)"
+else fail "immich db dump: none found"; fi
+
+if [ "$(systemctl show -p Result --value immich-backup.service)" = failed ]; then
+  fail "r2 backup: last run FAILED (journalctl -u immich-backup)"
+elif [ -f /var/lib/immich-backup/last-success ]; then
+  age=$(( (now - $(cat /var/lib/immich-backup/last-success)) / 3600 ))
+  [ "$age" -lt "$BACKUP_MAX_H" ] && ok "r2 backup ${age}h old" || fail "r2 backup ${age}h old (limit ${BACKUP_MAX_H}h)"
+elif [[ "$(systemctl is-active immich-backup.service)" =~ ^(active|activating)$ ]]; then
+  ok "r2 backup: first run in progress"
+else fail "r2 backup: never completed"; fi
+systemctl is-active -q immich-backup.timer && ok "r2 backup timer" || fail "r2 backup timer not active"
+
+# --- report
+summary="$( [ $fails -eq 0 ] && echo "ALL OK" || echo "$fails FAILED" ) on $(hostname) at $(date '+%F %T %Z')"
+report="$summary"$'\n\n'"$report"
+if [ "${1:-}" = --dry-run ]; then printf '%s' "$report"; exit $(( fails > 0 )); fi
+target="$HC_URL"; [ $fails -gt 0 ] && target="$HC_URL/fail"
+curl -fsS -m 15 --retry 5 -o /dev/null --data-raw "$report" "$target" || echo "ping to healthchecks.io failed" >&2
+printf '%s' "$report"
+exit $(( fails > 0 ))

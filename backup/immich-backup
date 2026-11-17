@@ -23,4 +23,5 @@ log "backup done"
 restic forget --tag immich --keep-daily 7 --keep-weekly 4 --keep-monthly 12
 if [ "$(date +%u)" = 7 ]; then log "weekly prune"; restic prune --max-unused 10%; fi
 if [ "$(date +%d)" = 01 ]; then log "monthly check (5% of data)"; restic check --read-data-subset 5%; fi
+install -d -m 700 /var/lib/immich-backup; date +%s > /var/lib/immich-backup/last-success
 log "all done"

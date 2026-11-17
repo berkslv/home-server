@@ -21,6 +21,7 @@ agent/                 agent image (Dockerfile, sshd config, entrypoint)
 immich/                Immich compose project (server, ML, postgres, valkey)
 backup/                restic -> Cloudflare R2 backup script + systemd timer (installed by hand, see docs)
 docs/                  docs/immich-operations.md: Immich runbook, migration history, backup & restore
+health/                hourly pi-health check -> healthchecks.io (emails on failure or silence), see docs
 host/setup.sh          on the Pi: Docker, cloudflared systemd service, host authorized_keys, /opt/immich
 cloudflare/setup.sh    tunnel (wrangler), ingress, DNS, Access app + policy
 deploy.sh              rsync to the Pi, run host/setup.sh, compose up
