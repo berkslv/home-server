@@ -33,15 +33,8 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent \
     && chmod 440 /etc/sudoers.d/agent
 
-# Hermes Agent, installed as the agent user into ~/.hermes so the skel copy below seeds a fresh home volume with it.
-# The telegram extra is preinstalled: otherwise the gateway stops at an install prompt on first start.
-# Download caches are dropped and the home is moved, not copied: /home/agent is a volume at runtime,
-# so the image only needs the skel, and a smaller layer keeps "exporting layers" fast on the Pi.
-RUN runuser -u agent -- env HOME=/home/agent \
-        bash -c 'curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-setup --skip-browser --skip-computer-use \
-            && ~/.local/bin/hermes pm install --extra telegram </dev/null' \
-    && rm -rf /home/agent/.hermes/cache/uv /home/agent/.hermes/cache/pnpm /home/agent/.npm /home/agent/.cache \
-    && mv /home/agent /opt/agent-skel \
+# /home/agent is a volume at runtime: keep the fresh home as a skel that the entrypoint copies on first start.
+RUN mv /home/agent /opt/agent-skel \
     && install -d -o agent -g agent /home/agent
 
 COPY sshd_config /etc/ssh/sshd_config.d/agent.conf

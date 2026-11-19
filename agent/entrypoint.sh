@@ -35,12 +35,4 @@ if [ -n "${TZ:-}" ] && [ -f "/usr/share/zoneinfo/$TZ" ]; then
     ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime && echo "$TZ" > /etc/timezone
 fi
 
-# Hermes gateway (Telegram etc.) in a detached tmux session; attach with `tmux attach -t hermes`.
-# stdin is /dev/null so a missing optional extra is installed instead of blocking on a [Y/n] prompt.
-if [ -x /home/agent/.local/bin/hermes ]; then
-    as_agent tmux new-session -d -s hermes -n gateway \
-        "while true; do /home/agent/.local/bin/hermes gateway run </dev/null; echo 'gateway exited, restarting in 10s'; sleep 10; done"
-    echo "hermes: gateway started (tmux attach -t hermes)"
-fi
-
 exec /usr/sbin/sshd -D -e

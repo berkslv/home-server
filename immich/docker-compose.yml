@@ -1,5 +1,5 @@
-# Immich photo library, from the official v3.4.1 release compose file:
-# https://github.com/immich-app/immich/releases/download/v3.4.1/docker-compose.yml
+# Immich photo library, from the official v3.4.2 release compose file:
+# https://github.com/immich-app/immich/releases/download/v3.4.2/docker-compose.yml
 #
 # Its own compose project ("immich"), separate from the agent stack. Data and
 # secrets stay outside the repo in /opt/immich (root:root 700), so neither the
@@ -19,7 +19,7 @@ name: immich
 services:
   immich-server:
     container_name: immich_server
-    image: ghcr.io/immich-app/immich-server:v3.4.1
+    image: ghcr.io/immich-app/immich-server:v3.4.2
     volumes:
       - /opt/immich/library:/data
       - /etc/localtime:/etc/localtime:ro
@@ -37,7 +37,7 @@ services:
 
   immich-machine-learning:
     container_name: immich_machine_learning
-    image: ghcr.io/immich-app/immich-machine-learning:v3.4.1
+    image: ghcr.io/immich-app/immich-machine-learning:v3.4.2
     # Keep ML from starving the Pi: at most 1 of 4 cores, lower priority than everything else
     cpus: 1.0
     cpu_shares: 256

@@ -1,4 +1,4 @@
-# Guidance for AI agents (Claude Code, opencode, Hermes) working on this home server
+# Guidance for AI agents (Claude Code, opencode) working on this home server
 
 Read this first. Details live in [README.md](README.md) (first deploy, SSH, Cloudflare) and
 [docs/immich-operations.md](docs/immich-operations.md) (Immich, backup, restore, monitoring, alerts).
@@ -7,7 +7,8 @@ Read this first. Details live in [README.md](README.md) (first deploy, SSH, Clou
 
 Raspberry Pi 4 (aarch64, Ubuntu, 459 GB USB SSD, LAN `192.168.1.100`, user `berkslv`) running:
 - **Immich** (photo library, ~30k assets) at `https://immich.berkslv.com` (Cloudflare Access) and `http://192.168.1.100:2283`
-- **agent** container (Claude Code / opencode / Hermes) on `127.0.0.1:2222`
+- **agent** container (Claude Code / opencode) on `127.0.0.1:2222`. Hermes Agent was removed on 2026-11-19 at the
+  owner's request: don't reinstall it.
 - **cloudflared** systemd service (Tunnel; no router ports open)
 - **restic → Cloudflare R2** nightly backup, **pi-health** hourly check → healthchecks.io (emails the owner)
 - **pi-security** hourly intrusion check → its own healthchecks.io check (docs §11)

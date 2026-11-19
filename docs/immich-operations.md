@@ -223,6 +223,14 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
   - Check disk space with `df -h /`.
 - **Twice a year:** `sudo immich-restore-test` and add a row to the restore-test table (§4).
 - **Temperature:** the Pi runs at 85 °C+ under transcoding and throttles itself. A fan case helps.
+- **How to update:** follow the skill `.agents/skills/update-home-server/SKILL.md` (agents load it automatically).
+
+**Update log**
+
+| Date | What |
+|---|---|
+| 2026-11-19 | apt: cloudflared 2026.10.7 → 2026.11.1, cloud-init security update (cloudflared's package restarted the tunnel and dropped SSH). Immich v3.4.1 → v3.4.2 (bug fixes only; postgres/valkey unchanged). Agent image rebuilt from scratch (latest Claude Code, Node, gh, uv). **Hermes Agent removed** at the owner's request (image, entrypoint, `~/.hermes` in the volume). Pre-upgrade DB dump: `library/backups/manual-pre-v3.4.2-*.sql.gz`. |
+
 
 ---
 

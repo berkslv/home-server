@@ -12,7 +12,7 @@ browser ────────────────────────
 
 - **cloudflared** – runs on the Pi as a systemd service (not in Docker); outbound-only, no ports are opened on the router.
 - **ssh.berkslv.com** – SSH into the Pi host itself, gated by an Access policy (email allowlist, one-time PIN). Also available as a browser terminal from the Access App Launcher.
-- **agent** – Ubuntu 24.04 container with Node.js, Python/uv, gh, git, tmux, build tools, Claude Code, opencode and Hermes Agent. Passwordless sudo for user `agent`; `/home/agent` persists in a volume. Its sshd is published only on the Pi's `127.0.0.1:2222`, reached with a ProxyJump through the host.
+- **agent** – Ubuntu 24.04 container with Node.js, Python/uv, gh, git, tmux, build tools, Claude Code and opencode. Passwordless sudo for user `agent`; `/home/agent` persists in a volume. Its sshd is published only on the Pi's `127.0.0.1:2222`, reached with a ProxyJump through the host.
 - **immich.berkslv.com** – Immich photo library, behind the same Access policy. Its own compose project (`immich/`); data and the DB password live in `/opt/immich` (root-only, outside the repo dir).
 
 ## Layout
@@ -129,7 +129,7 @@ alias hs='sudo docker compose --env-file /etc/home-server/.env'   # secrets are 
 hs logs -f
 hs up -d --build                      # rebuild the agent image
 ssh -p 2222 agent@localhost           # or: sudo docker exec -it -u agent agent bash
-sudo docker restart agent             # restart the Hermes gateway (e.g. after `hermes setup`)
+sudo docker restart agent             # restart the agent container
 
 systemctl status cloudflared
 journalctl -u cloudflared -f
