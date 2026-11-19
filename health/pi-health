@@ -18,6 +18,10 @@ CONTAINERS="immich_server immich_machine_learning immich_postgres immich_redis a
 PUBLIC_URL=https://immich.berkslv.com/api/server/ping
 ACCESS_ENV=/etc/home-server/.env    # IMMICH_ACCESS_CLIENT_ID / _SECRET (Access service token), root 600
 
+# Right after boot the timer fires at once (no RTC: systemd catches up "missed" runs) while containers are
+# still starting. Wait until the Pi has been up 5 minutes so a reboot doesn't send a false DOWN email.
+up=$(cut -d. -f1 /proc/uptime); [ "$up" -lt 300 ] && sleep $((300 - up))
+
 fails=0; report=""
 ok()   { report+="OK    $*"$'\n'; }
 fail() { report+="FAIL  $*"$'\n'; fails=$((fails+1)); }
