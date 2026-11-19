@@ -319,7 +319,7 @@ Emails from the **`pi-security`** check are about possible intrusions, not outag
 - [ ] Fan case for the Pi.
 - [ ] Look at the 9 JPGs without thumbnails (§3).
 - [ ] Next restore test: 2027-05 (§4).
-- [ ] Create the healthchecks.io check `pi-security` and put its URL in `/etc/pi-health.env` as `HC_SECURITY_URL` (§11).
+- [x] Create the healthchecks.io check `pi-security` and put its URL in `/etc/pi-health.env` as `HC_SECURITY_URL` (§11). Done 2026-11-19, alert path tested.
 - [ ] Decide on Immich LAN exposure: `0.0.0.0:2283` is reachable by every device on the Wi-Fi (login still required).
 - [ ] `ufw` has no rules (`Status: inactive`). Optional: `ufw allow 22/tcp && ufw enable` (Docker ports bypass ufw).
 
@@ -329,7 +329,7 @@ Emails from the **`pi-security`** check are about possible intrusions, not outag
 
 Added 2026-11-19. `security/pi-security`, installed by `host/install-ops.sh` as `/usr/local/sbin/pi-security` (root 700) with `pi-security.timer` (hourly at :30, between pi-health runs). State: `/var/lib/pi-security/` (root 700). It reports to **its own** healthchecks.io check, so a security finding never hides an outage alert (healthchecks.io only emails on state changes).
 
-**Setup (once):** in healthchecks.io create a check named `pi-security`, period **1 hour**, grace **30 min**, email integration on. Then:
+**Setup (once; done 2026-11-19 via the API, then tested: finding → DOWN email, next clean run → UP):** in healthchecks.io create a check named `pi-security`, period **1 hour**, grace **30 min**, email integration on. Then:
 
 ```bash
 sudoedit /etc/pi-health.env        # add: HC_SECURITY_URL=https://hc-ping.com/<uuid of the pi-security check>
