@@ -1,6 +1,6 @@
 # Immich operations
 
-The reference for the Immich install on the Pi: how it's laid out, how the Google Photos library got in, and how backup and restore work. The README covers the first deploy. This file covers everything after it.
+The reference for the Immich install on the Pi: how it's laid out, how the Google Photos library got in, and how backup and restore work. The README covers the first deploy. This file covers everything after it. Agents: read [AGENTS.md](../AGENTS.md) first.
 
 This file never contains secrets. Each one is listed by where it lives.
 
@@ -54,7 +54,23 @@ immich logs -f immich-server
 - **Job concurrency:** face detection 1, thumbnail generation 2.
 - **Storage template:** `{{y}}/{{MM}}/{{dd}}/{{filename}}`.
 
-To run ML on the Mac again for a large batch, start the `immich-machine-learning` container there with the same version tag and port 3003 published to the LAN. Video transcoding always runs on the Pi; it can't be offloaded.
+**Running ML on the Mac** (M1 MacBook, `192.168.1.104`, Docker Desktop). Do this for big upload batches; otherwise the Pi grinds through them on one core at 80 °C+.
+
+```bash
+# first time
+docker run -d --name immich-ml --restart unless-stopped \
+  -p 3003:3003 -v immich-model-cache:/cache \
+  -e MACHINE_LEARNING_MODEL_REVISION=v2 \
+  ghcr.io/immich-app/immich-machine-learning:v3.4.1
+# later
+docker start immich-ml
+caffeinate -dims          # keep the Mac awake while the queue drains
+```
+
+- Use the **same version tag as the server** and the same `MODEL_REVISION`, or search and face results won't match. After an Immich upgrade: `docker rm -f immich-ml` and run it again with the new tag.
+- Check from the Pi: `curl http://192.168.1.104:3003/ping` → `pong`. Watch the queues with the `redis-cli llen` command in AGENTS.md.
+- If the Mac's LAN IP changes, update the URL in Administration → Settings → Machine Learning (or give the Mac a DHCP reservation).
+- Video transcoding always runs on the Pi; it can't be offloaded.
 
 ---
 
@@ -84,7 +100,7 @@ To run ML on the Mac again for a large batch, start the `immich-machine-learning
 
 ## 4. Off-site backup: restic → Cloudflare R2
 
-Set up on 2026-11-17. Copies of the script and units are in `backup/` in this repo (no secrets). **`host/setup.sh` doesn't install them yet**, so on a rebuild install them by hand (§5 step 3).
+Set up on 2026-11-17. The script and units are in `backup/` in this repo (no secrets). `host/install-ops.sh` (run by every deploy) installs them; it only enables the timer once the secret files in `/etc/restic/` exist.
 
 | | |
 |---|---|
@@ -165,14 +181,11 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
 2. **Stop Immich** before restoring: `immich down`.
 3. **Restore the files:**
    ```bash
-   sudo apt install restic
-   sudo install -d -m 700 /etc/restic
+   # deploy.sh already installed restic and the scripts (host/install-ops.sh); only the secrets are missing
    sudoedit /etc/restic/r2.env      # R2_ACCOUNT_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, R2_BUCKET=immich-backup
    sudoedit /etc/restic/password    # the password, no trailing newline needed
    sudo chmod 600 /etc/restic/*
-   sudo install -m 700 /opt/home-server/backup/immich-backup /usr/local/sbin/
-   sudo install -m 644 /opt/home-server/backup/immich-backup.{service,timer} /etc/systemd/system/
-   sudo systemctl daemon-reload
+   sudo systemctl disable --now immich-backup.timer   # if it got enabled: no backups until the restore is done
    sudo immich-backup restic snapshots
    sudo immich-backup restic restore latest --target /     # writes back to /opt/immich/library/...
    ```
@@ -192,7 +205,7 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
 5. **Finish up:**
    - Immich regenerates thumbnails and transcoded videos. Run *Administration → Jobs → Generate Thumbnails / Transcode Videos → Missing*. Expect about 1–2 days of CPU on the Pi.
    - ML results are in the dump, so search, faces and people don't need re-running.
-6. **Re-enable the backup timer:** `sudo systemctl enable --now immich-backup.timer`.
+6. **Re-enable the backup timer:** `sudo systemctl enable --now immich-backup.timer`, and create `/etc/pi-health.env` (§7), then `sudo /opt/home-server/host/install-ops.sh` to confirm everything is enabled.
 
 ---
 
@@ -213,7 +226,7 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
 
 ## 7. Monitoring: pi-health → healthchecks.io
 
-Set up on 2026-11-17. The files are in `health/` in this repo. Like the backup, it's installed by hand and not by `host/setup.sh`.
+Set up on 2026-11-17. The files are in `health/` in this repo and `host/install-ops.sh` installs them on every deploy; the timer is enabled once `/etc/pi-health.env` exists.
 
 **How it works.** `pi-health.timer` runs `/usr/local/sbin/pi-health` (as root) every hour and 5 minutes after boot. It reports to the healthchecks.io check **`pi-health`** (period 1 h, grace 30 min). Alerts go by email to the account address.
 
@@ -251,12 +264,54 @@ sudo journalctl -u pi-health -n 30
 **Install on a rebuilt host:**
 
 ```bash
-sudo apt install --no-install-recommends smartmontools
-sudo install -m 700 /opt/home-server/health/pi-health /usr/local/sbin/
-sudo install -m 644 /opt/home-server/health/pi-health.{service,timer} /etc/systemd/system/
 sudoedit /etc/pi-health.env          # HC_URL=https://hc-ping.com/<uuid>   (from the healthchecks.io dashboard)
 sudo chmod 600 /etc/pi-health.env
-sudo systemctl daemon-reload && sudo systemctl enable --now pi-health.timer
+sudo /opt/home-server/host/install-ops.sh   # installs smartmontools, the script, and enables the timer
 ```
 
+**Changing the check:** edit `health/pi-health` in the repo and deploy (or follow the Pi workflow in AGENTS.md). Test with `--dry-run` first.
+
 **Planned downtime** (an upgrade, a move): pause the check in the healthchecks.io dashboard first, then resume it afterwards.
+
+---
+
+## 8. Got an alert email? What to do
+
+healthchecks.io sends **DOWN** with the report (the `FAIL` lines say what broke) and **UP** when it recovers. Start with `sudo pi-health --dry-run` on the Pi (or ask an agent with sudo to).
+
+| Failing line | Likely cause | Do this |
+|---|---|---|
+| *No report at all* ("no ping for 1 h 30 min") | Pi off, frozen, power cut, or internet down | Check the Pi's power/LEDs; on the LAN `ping 192.168.1.100`; power-cycle if frozen. Nothing on the Pi can fix this by itself. |
+| `container X: exited` / `unhealthy` / `missing` | crash, OOM, or a failed update | `immich ps`, `immich logs --tail 100 <service>`; `immich up -d` restarts. For `agent`: `sudo docker compose -f /opt/home-server/docker-compose.yml up -d` |
+| `immich api (local): no pong` | server still starting (~1 min after boot) or crashed | wait one hour; if it persists, `immich logs immich-server` |
+| `cloudflared service` / `tunnel /ready` | tunnel down or token revoked | `journalctl -u cloudflared -n 50`; `sudo systemctl restart cloudflared` (cuts remote access for a few seconds) |
+| `public url` only | Cloudflare Access/DNS change or rotated service token | check the Access app in Zero Trust; re-run `cloudflare/setup.sh` and redeploy |
+| `disk / NN%` | library growth or a runaway log | `sudo du -xh --max-depth=2 /opt /var | sort -h | tail`; `immich` and `encoded-video` are the big ones. Time for a bigger SSD if it's photos. |
+| `memory only N% available` | ML or a stuck process | `top -o %MEM`; restarting `immich_machine_learning` frees its model cache |
+| `cpu temp NN°C` | heavy ML/transcoding (new uploads, upgrade) | expected during big jobs; clears by itself. Start the Mac ML server (§2) to finish faster. Persistent at idle = cooling problem. |
+| `under-voltage` | weak power supply or cable | use the official 5.1 V / 3 A PSU; under-voltage can corrupt the SSD |
+| `ssd smart` | the SSD is failing | **urgent:** make sure the last R2 backup is fresh (`restic snapshots`), buy a replacement, follow §5 |
+| `immich db dump NNh old` | Immich's 02:00 backup job disabled or failing | Administration → Settings → Backup; `immich logs immich-server | grep -i backup` |
+| `r2 backup: last run FAILED` | R2 token expired/revoked, network, repo lock | `sudo journalctl -u immich-backup -n 50`. Stale lock: `sudo immich-backup restic unlock`. Token: new R2 token → `/etc/restic/r2.env`. Then `sudo systemctl start immich-backup.service` |
+| `r2 backup NNh old` | timer didn't fire (Pi was off) or runs too long | `systemctl list-timers immich-backup.timer`; start a run by hand |
+
+**Planned work** (upgrade, moving the Pi): pause the check in the healthchecks.io dashboard first, resume after.
+
+---
+
+## 9. Phone app (Immich iOS/Android)
+
+- **Server URL:** `https://immich.berkslv.com`, with the Access service token as custom proxy headers (README → Immich → Limits).
+- **Automatic URL switching** (app settings → Networking): on the home Wi-Fi use `http://192.168.1.100:2283`, elsewhere the public URL. At home this skips Cloudflare, so videos over 100 MB upload; outside, those wait until you're home.
+- **Backup:** turn on auto backup for the albums you want. The first phone backup (2026-11-17 evening, ~2,250 new assets) kept the Pi's ML busy for ~12 h; start the Mac ML server before enabling backup on a new phone.
+
+---
+
+## 10. Open items
+
+- [ ] Change the sudo password (it was shared in an AI chat session).
+- [ ] `gh auth logout` / `wrangler logout` on the Pi host user when not needed.
+- [ ] Restic password in the password manager (confirm).
+- [ ] Fan case for the Pi.
+- [ ] Look at the 9 JPGs without thumbnails (§3).
+- [ ] Next restore test: 2027-05 (§4).

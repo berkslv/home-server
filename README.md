@@ -2,6 +2,8 @@
 
 Raspberry Pi (Ubuntu Server) exposed through Cloudflare Tunnel and protected by Cloudflare Access, running a Docker-based agent box and Immich.
 
+**Start here:** [AGENTS.md](AGENTS.md) (rules, workflow, secrets map, common tasks; also read by AI agents) · [docs/immich-operations.md](docs/immich-operations.md) (Immich runbook, backup/restore, alerts).
+
 ```
 laptop ── cloudflared access ssh ──▶ Cloudflare Access (email OTP) ──▶ Tunnel ──▶ cloudflared (Pi host) ──▶ Pi sshd :22
                                                                                                         └─▶ agent container 127.0.0.1:2222
@@ -19,10 +21,12 @@ browser ────────────────────────
 docker-compose.yml     agent container
 agent/                 agent image (Dockerfile, sshd config, entrypoint)
 immich/                Immich compose project (server, ML, postgres, valkey)
-backup/                restic -> Cloudflare R2 backup script + systemd timer (installed by hand, see docs)
+backup/                restic -> Cloudflare R2 backup script + timer, restore-test script
 docs/                  docs/immich-operations.md: Immich runbook, migration history, backup & restore
-health/                hourly pi-health check -> healthchecks.io (emails on failure or silence), see docs
+health/                hourly pi-health check -> healthchecks.io (emails on failure or silence)
 host/setup.sh          on the Pi: Docker, cloudflared systemd service, host authorized_keys, /opt/immich
+host/install-ops.sh    on the Pi: installs backup/ and health/ (scripts + timers), called by setup.sh
+AGENTS.md, CLAUDE.md   guidance for people and AI agents working on this server
 cloudflare/setup.sh    tunnel (wrangler), ingress, DNS, Access app + policy
 deploy.sh              rsync to the Pi, run host/setup.sh, compose up
 .env.example           TUNNEL_TOKEN, AUTHORIZED_KEYS, TZ
@@ -160,6 +164,7 @@ Limits:
 - The Immich mobile app can't do the Access email login, so `cloudflare/setup.sh` creates an Access service token (`immich-app`) allowed on the Immich app and writes it to `.env` as `IMMICH_ACCESS_CLIENT_ID` / `IMMICH_ACCESS_CLIENT_SECRET`. In the app: login screen → settings gear → Advanced → Custom proxy headers, add `CF-Access-Client-Id` and `CF-Access-Client-Secret` with those values. To rotate, delete `IMMICH_ACCESS_CLIENT_SECRET` from `.env`, re-run the script and update the app.
 - Cloudflare rejects request bodies over 100 MB on the free plan, so large videos and bulk imports (Google Takeout via `immich-go`) should go to `http://localhost:2283` on the Pi or the LAN URL.
 - Off-site backup: nightly restic to Cloudflare R2 (03:00, keeps ~1 year). Setup, costs, restore and disaster recovery are in [docs/immich-operations.md](docs/immich-operations.md).
+- Monitoring: hourly `pi-health` → healthchecks.io, which emails on any failure or if the Pi goes silent. What to do per alert: docs §8.
 
 ## Notes
 

@@ -5,6 +5,7 @@
 #   - /opt/immich (root-only) with a generated DB password on first run
 #   - cloudflared as a systemd service, tunnel token from .env
 #   - AUTHORIZED_KEYS from .env -> host user's ~/.ssh/authorized_keys
+#   - backup / restore-test / health check via host/install-ops.sh
 #
 # Usage: sudo HOST_USER=berkslv ./host/setup.sh
 #
@@ -98,3 +99,6 @@ EOF
 sshd -t
 systemctl reload ssh
 log "sshd: $(sshd -T | grep -iE '^(passwordauthentication|permitrootlogin)' | tr '\n' ' ')"
+
+# Backup, restore test and health check (scripts + systemd timers) from backup/ and health/
+"$DIR/host/install-ops.sh"
