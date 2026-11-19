@@ -15,16 +15,17 @@ cd "$(dirname "$0")"
 grep -q '^TUNNEL_TOKEN=.' .env || { echo "TUNNEL_TOKEN missing in .env, run cloudflare/setup.sh" >&2; exit 1; }
 
 ssh -t "$PI" "sudo install -d -o \$USER -g \$USER $REMOTE_DIR"
-rsync -az --delete --exclude .git --exclude .DS_Store ./ "$PI:$REMOTE_DIR/"
+rsync -az --delete --exclude .git --exclude .DS_Store --exclude .env --exclude .env.incoming ./ "$PI:$REMOTE_DIR/"
+# Secrets: uploaded 600, then host/setup.sh moves them to root-only /etc/home-server/.env and deletes the copy
+rsync -a --chmod=F600 .env "$PI:$REMOTE_DIR/.env.incoming"
 
 # Host: Docker, cloudflared service, SSH keys; then the agent and Immich containers
 ssh -t "$PI" "set -e
-    chmod 600 $REMOTE_DIR/.env
-    sudo HOST_USER=\$USER $REMOTE_DIR/host/setup.sh
+    sudo HOST_USER=\$USER $REMOTE_DIR/host/setup.sh || { rm -f $REMOTE_DIR/.env.incoming; exit 1; }
     cd $REMOTE_DIR
     if [ -n '$BUILD' ] || ! sudo docker image inspect home-server/agent:latest >/dev/null 2>&1; then
-        sudo docker compose build agent
+        sudo docker compose --env-file /etc/home-server/.env build agent
     fi
-    sudo docker compose up -d --remove-orphans && sudo docker compose ps
+    sudo docker compose --env-file /etc/home-server/.env up -d --remove-orphans && sudo docker compose --env-file /etc/home-server/.env ps
     sudo docker compose -f immich/docker-compose.yml --env-file /opt/immich/.env up -d --remove-orphans
     sudo docker compose -f immich/docker-compose.yml --env-file /opt/immich/.env ps"

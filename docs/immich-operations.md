@@ -28,7 +28,9 @@ This file never contains secrets. Each one is listed by where it lives.
 | `/opt/immich/library/encoded-video/` | transcoded videos (~36 GB) | no, regenerable (~1 day of CPU) |
 | `/opt/immich/postgres/` | live database files | no. Use the dumps; copying a running DB is unsafe. |
 | `/etc/restic/` | R2 credentials and the restic password (root 600) | no. Keep the password in a password manager. |
-| `/etc/pi-health.env` | healthchecks.io ping URL (root 600) | no. It's shown in the healthchecks.io dashboard. |
+| `/etc/pi-health.env` | healthchecks.io ping URLs `HC_URL`, `HC_SECURITY_URL` (root 600) | no. They're shown in the healthchecks.io dashboard. |
+| `/etc/home-server/.env` | deploy secrets: tunnel token, Access service token, SSH keys, API keys (root 600) | no. The Mac's `.env` is the master copy. |
+| `/var/lib/pi-security/` | intrusion-check baseline and last-run time (root 700) | no |
 | `/var/lib/immich-backup/last-success` | epoch time of the last fully successful backup run, read by `pi-health` | no |
 
 The import leftovers (old standalone compose files, `import.sh`, `import-logs/`, `immich-go.env`, the root tmux session `immich-import`) were removed on 2026-11-19. `/opt/immich` now holds only `.env`, `library/` and `postgres/`. `/usr/local/bin/immich-go` is kept for re-uploading restored files (§4).
@@ -241,7 +243,7 @@ Set up on 2026-11-17. The files are in `health/` in this repo and `host/install-
 | containers `immich_server`, `immich_machine_learning`, `immich_postgres`, `immich_redis`, `agent` | not running, or unhealthy |
 | Immich API `localhost:2283/api/server/ping` | no `pong` |
 | `cloudflared` service and `localhost:20241/ready` (tunnel connected to the edge) | inactive, or not ready |
-| public `https://immich.berkslv.com/api/server/ping`, using the Access service token from `/opt/home-server/.env` | no `pong` end to end |
+| public `https://immich.berkslv.com/api/server/ping`, using the Access service token from `/etc/home-server/.env` | no `pong` end to end |
 | disk `/` | 85% or more used |
 | memory | under 5% available |
 | CPU temperature | 80 °C or more. This can happen during heavy jobs, such as transcoding after an upgrade. |
@@ -297,6 +299,8 @@ healthchecks.io sends **DOWN** with the report (the `FAIL` lines say what broke)
 
 **Planned work** (upgrade, moving the Pi): pause the check in the healthchecks.io dashboard first, resume after.
 
+Emails from the **`pi-security`** check are about possible intrusions, not outages: see §11.
+
 ---
 
 ## 9. Phone app (Immich iOS/Android)
@@ -315,3 +319,52 @@ healthchecks.io sends **DOWN** with the report (the `FAIL` lines say what broke)
 - [ ] Fan case for the Pi.
 - [ ] Look at the 9 JPGs without thumbnails (§3).
 - [ ] Next restore test: 2027-05 (§4).
+- [ ] Create the healthchecks.io check `pi-security` and put its URL in `/etc/pi-health.env` as `HC_SECURITY_URL` (§11).
+- [ ] Decide on Immich LAN exposure: `0.0.0.0:2283` is reachable by every device on the Wi-Fi (login still required).
+- [ ] `ufw` has no rules (`Status: inactive`). Optional: `ufw allow 22/tcp && ufw enable` (Docker ports bypass ufw).
+
+---
+
+## 11. Intrusion detection: pi-security
+
+Added 2026-11-19. `security/pi-security`, installed by `host/install-ops.sh` as `/usr/local/sbin/pi-security` (root 700) with `pi-security.timer` (hourly at :30, between pi-health runs). State: `/var/lib/pi-security/` (root 700). It reports to **its own** healthchecks.io check, so a security finding never hides an outage alert (healthchecks.io only emails on state changes).
+
+**Setup (once):** in healthchecks.io create a check named `pi-security`, period **1 hour**, grace **30 min**, email integration on. Then:
+
+```bash
+sudoedit /etc/pi-health.env        # add: HC_SECURITY_URL=https://hc-ping.com/<uuid of the pi-security check>
+sudo systemctl start pi-security.service && sudo journalctl -u pi-security -n 5
+```
+
+**What it looks at:**
+
+| Kind | Check | Alerts when |
+|---|---|---|
+| CHANGED (vs baseline) | `files`: SHA-256 of accounts (`passwd`, `shadow`, `group`), sudoers, sshd config, both `authorized_keys`, cron, systemd units and what's enabled at boot, `/usr/local/{s,}bin/*`, PAM, `ld.so.preload`, docker daemon config, all secret files | any file added, removed or changed. A password change also changes `/etc/shadow`. |
+| | `ports`: listening TCP/UDP sockets (minus loopback ephemeral ports and cloudflared's outbound QUIC) | a new service listens |
+| | `containers`: name + image | a new or replaced container/image tag |
+| | `immich`: users, API keys, shared links | someone added a user, key or public link |
+| BAD (always wrong) | `berkslv` in docker/lxd, extra uid 0, `NOPASSWD`, `/opt/immich` not root 700, secret dirs not root-only, `/opt/home-server/.env` present, sshd passwords on, a container with the Docker socket or privileged | immediately, until fixed |
+| EVENT (since last run) | SSH logins | from anywhere except the Mac (`192.168.1.104`) or the tunnel (`::1`, which Cloudflare Access gates) |
+| | failed SSH attempts, failed sudo passwords, sudo by another user, `su` | any |
+| | Immich | a new login session (user + device), or a failed login attempt |
+
+**Reading an alert.** The email has every finding.
+- **EVENT** lines are reported once and clear the next hour. If it was you (you logged in on a new device, mistyped sudo), ignore it.
+- **CHANGED** lines repeat every hour until handled. If you caused the change (deploy, upgrade, new key, password change), confirm it and accept:
+  ```bash
+  sudo pi-security --dry-run     # see the findings
+  sudo pi-security --accept      # current state becomes the new baseline
+  ```
+  Deploys don't accept automatically on purpose: an agent or attacker shouldn't be able to hide a change by triggering one.
+- **No ping for 1 h 30**: the Pi is down, *or someone disabled the check*. Treat it as suspicious if pi-health is still OK.
+
+**If it looks like a real intrusion** (unknown login, change you didn't make):
+1. Don't accept the baseline. Save the evidence: `sudo pi-security --dry-run > ~/incident.txt`, `sudo journalctl --since -2d > ~/journal.txt`.
+2. Immich: Account Settings → Authorized devices → log out everything; change the password. Remove unknown users, API keys and shared links (Administration).
+3. Cloudflare: Zero Trust → Logs → Access to see who logged in from where. Rotate the Access service token and the tunnel token (README → Immich limits; Zero Trust → Tunnels), update `.env` on the Mac, redeploy, update the phone app headers.
+4. Pi: change the sudo password; remove unknown keys from `AUTHORIZED_KEYS` and redeploy; rotate every API key in `.env`, the R2 token, and the healthchecks.io URLs.
+5. Check the backup is intact: `sudo immich-backup restic snapshots` (old snapshots still there?).
+6. If root was compromised, don't clean the Pi: rebuild it from this repo + R2 (§5).
+
+**Limits:** someone who already has root can disable or edit this check. The dead man's switch (no ping → email) and the file hash of the script itself make that visible, but not impossible to hide. It also can't see Cloudflare Access logs; check those by hand monthly (Zero Trust → Logs → Access).

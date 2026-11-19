@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# Hourly intrusion check of the Pi. Reports to its own healthchecks.io check (HC_SECURITY_URL):
+#   nothing suspicious -> ping $HC_SECURITY_URL       (report as body)
+#   anything suspicious -> ping $HC_SECURITY_URL/fail (healthchecks.io emails the report)
+#   no ping for 1h30 (Pi down, or this check disabled/tampered with) -> healthchecks.io emails
+#
+# Two kinds of findings:
+#   EVENT   things that happened since the last run (logins, sudo failures, new Immich devices).
+#           Reported once; the next run is OK again unless it happens again.
+#   CHANGED differences from the baseline (files, ports, containers, Immich users/keys/links).
+#           Reported every hour until you look at it and, if it was you, run: sudo pi-security --accept
+#
+# Usage: sudo pi-security            run and ping
+#        sudo pi-security --dry-run  run and print, don't ping, don't advance the event window
+#        sudo pi-security --accept   take the current state as the new baseline
+# Root only: the script, its state (/var/lib/pi-security) and the ping URL (/etc/pi-health.env).
+set -uo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+umask 077
+[ "$(id -u)" = 0 ] || { echo "pi-security must run as root (sudo pi-security)" >&2; exit 2; }
+[ -r /etc/pi-health.env ] && . /etc/pi-health.env
+HC_SECURITY_URL=${HC_SECURITY_URL:-}
+
+HOST_USER=berkslv
+# SSH may come from: the Mac on the LAN, and cloudflared (::1), which is gated by Cloudflare Access
+SSH_ALLOWED_FROM="192.168.1.104 ::1 127.0.0.1"
+STATE=/var/lib/pi-security
+WATCH=(
+  /etc/passwd /etc/shadow /etc/group /etc/gshadow
+  /etc/sudoers /etc/sudoers.d/*
+  /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*
+  /home/$HOST_USER/.ssh/authorized_keys /root/.ssh/authorized_keys
+  /etc/crontab /etc/cron.d/* /var/spool/cron/crontabs/*
+  /etc/systemd/system/*.service /etc/systemd/system/*.timer /etc/systemd/system/*.d/*.conf
+  /usr/local/sbin/* /usr/local/bin/*
+  /etc/ld.so.preload /etc/pam.d/* /etc/docker/daemon.json
+  /etc/cloudflared/* /etc/restic/* /etc/pi-health.env /etc/home-server/.env /opt/immich/.env
+)
+
+fails=0; report=""
+ok()   { report+="OK      $*"$'\n'; }
+fail() { report+="$*"$'\n'; fails=$((fails+1)); }
+q()    { docker exec immich_postgres psql -U postgres -d immich -Atc "$1" 2>/dev/null; }
+
+# ---------- current state (compared with the baseline) ----------
+snap_files() {
+  for f in "${WATCH[@]}"; do [ -f "$f" ] && sha256sum "$f"; done
+  # what is enabled at boot
+  ls -1 /etc/systemd/system/*.wants/ 2>/dev/null | grep -v '^$'
+}
+snap_ports() {  # listening sockets, minus loopback high ports (claude, containerd) and cloudflared's QUIC client ports
+  ss -tulnpH | awk '{print $1, $5, $7}' | sed -E 's/users:\(\("([^"]*)".*/\1/' \
+    | grep -vE ' cloudflared$' | grep -vE '%(eth0|wlan0):546 ' \
+    | awk '{split($2,a,":"); p=a[length(a)]; if ($2 ~ /^(127\.|\[::1\])/ && p+0 >= 32768) next; print}' | sort -u
+}
+snap_containers() {
+  docker ps -a --format '{{.Names}} {{.Image}}' | sort
+}
+snap_immich() {
+  echo "# users";        q "select email, \"isAdmin\" from \"user\" where \"deletedAt\" is null order by 1"
+  echo "# api keys";     q "select k.name, u.email from api_key k join \"user\" u on u.id = k.\"userId\" order by 1"
+  echo "# shared links"; q "select l.type, u.email, l.\"createdAt\"::date from shared_link l join \"user\" u on u.id = l.\"userId\" order by 3"
+}
+SNAPS="files ports containers immich"
+
+if [ "${1:-}" = --accept ]; then
+  install -d -m 700 "$STATE/baseline"
+  for s in $SNAPS; do "snap_$s" > "$STATE/baseline/$s"; done
+  [ -f "$STATE/last-run" ] || date +%s > "$STATE/last-run"
+  echo "baseline saved: $(for s in $SNAPS; do printf '%s=%s ' "$s" "$(wc -l < "$STATE/baseline/$s")"; done)"
+  exit 0
+fi
+[ -d "$STATE/baseline" ] || { echo "no baseline yet: run sudo pi-security --accept first" >&2; exit 2; }
+
+for s in $SNAPS; do
+  d=$(diff <("snap_$s") "$STATE/baseline/$s" | grep -E '^[<>]' | sed -E 's/^</  now:   /; s/^>/  was:   /')
+  if [ -z "$d" ]; then ok "$s unchanged since baseline"
+  else
+    [ "$s" = files ] && d=$(sed -E 's/  [0-9a-f]{64}  /  /' <<<"$d")   # hide hashes, keep file names
+    fail "CHANGED $s differs from baseline:"$'\n'"$d"
+  fi
+done
+
+# ---------- invariants (always wrong, no baseline needed) ----------
+id -nG "$HOST_USER" | tr ' ' '\n' | grep -qxE 'docker|lxd' && fail "BAD     $HOST_USER is in the docker or lxd group (root-equivalent)" || ok "$HOST_USER not in docker/lxd"
+u0=$(awk -F: '$3==0 && $1!="root"{print $1}' /etc/passwd); [ -z "$u0" ] && ok "only root has uid 0" || fail "BAD     extra uid-0 account(s): $u0"
+grep -rqs NOPASSWD /etc/sudoers /etc/sudoers.d/ && fail "BAD     NOPASSWD found in sudoers" || ok "no NOPASSWD sudo"
+[ "$(stat -c '%U:%G %a' /opt/immich)" = "root:root 700" ] && ok "/opt/immich root-only" || fail "BAD     /opt/immich is $(stat -c '%U:%G %a' /opt/immich)"
+for f in /etc/restic /etc/home-server /etc/pi-health.env; do
+  [ -e "$f" ] || continue
+  m=$(stat -c '%U %a' "$f"); [[ "$m" =~ ^root\ [67]00$ ]] && ok "$f root-only" || fail "BAD     $f is $m"
+done
+[ -e /opt/home-server/.env ] && fail "BAD     /opt/home-server/.env exists (readable by $HOST_USER; secrets belong in /etc/home-server/.env)" || ok "no secrets in /opt/home-server"
+sshd -T 2>/dev/null | grep -qix 'passwordauthentication no' && ok "sshd: passwords disabled" || fail "BAD     sshd accepts passwords"
+sock=$(docker ps -q | xargs -r docker inspect -f '{{.Name}} {{range .Mounts}}{{.Source}} {{end}}{{.HostConfig.Privileged}}' | grep -E 'docker\.sock| true$' | cut -d' ' -f1)
+[ -z "$sock" ] && ok "no container has the docker socket or privileged mode" || fail "BAD     docker socket / privileged: $sock"
+
+# ---------- events since the last run ----------
+last=$(cat "$STATE/last-run" 2>/dev/null || date -d '-1 hour' +%s)
+since="@$last"
+now=$(date +%s)
+
+ssh_ok=0; ssh_bad=""
+while read -r user ip; do
+  if [[ " $SSH_ALLOWED_FROM " == *" $ip "* ]]; then ssh_ok=$((ssh_ok+1)); else ssh_bad+="  $user from $ip"$'\n'; fi
+done < <(journalctl -u ssh --since "$since" -o cat --no-pager 2>/dev/null | sed -nE 's/^Accepted [a-z-]+ for ([^ ]+) from ([^ ]+) port.*/\1 \2/p')
+[ -z "$ssh_bad" ] && ok "ssh logins: $ssh_ok, all from allowed sources" || fail "EVENT   ssh login from an unexpected address:"$'\n'"${ssh_bad%$'\n'}"
+
+n=$(journalctl -u ssh --since "$since" -o cat --no-pager 2>/dev/null | grep -cE '^(Invalid user|Failed |error: maximum authentication)')
+[ "$n" -eq 0 ] && ok "no failed ssh attempts" || fail "EVENT   $n failed ssh attempt(s): journalctl -u ssh --since @$last"
+
+sj=$(journalctl _COMM=sudo --since "$since" -o cat --no-pager 2>/dev/null)
+n=$(grep -cE 'authentication failure|incorrect password attempt' <<<"$sj")
+[ "$n" -eq 0 ] && ok "no failed sudo attempts" || fail "EVENT   $n failed sudo password attempt(s). If this wasn't you typing it wrong, someone is guessing."
+other=$(grep -E ' : .*COMMAND=' <<<"$sj" | sed -E 's/^ *([^ ]+) : .*/\1/' | grep -vx "$HOST_USER" | sort | uniq -c | tr -s ' ')
+[ -z "$other" ] && ok "sudo used only by $HOST_USER ($(grep -c 'COMMAND=' <<<"$sj")x)" || fail "EVENT   sudo used by another user:$other"
+n=$(journalctl _COMM=su --since "$since" -o cat --no-pager 2>/dev/null | grep -c 'session opened')
+[ "$n" -eq 0 ] && ok "no su sessions" || fail "EVENT   $n su session(s): journalctl _COMM=su --since @$last"
+
+new=$(q "select '  ' || u.email || ': ' || coalesce(nullif(s.\"deviceType\",''),'?') || ' / ' || coalesce(nullif(s.\"deviceOS\",''),'?') from session s join \"user\" u on u.id = s.\"userId\" where s.\"createdAt\" > to_timestamp($last)")
+[ -z "$new" ] && ok "no new immich logins" || fail "EVENT   new Immich login(s). If not you: Account Settings -> Authorized devices -> log out, change password:"$'\n'"$new"
+n=$(docker logs --since "$(date -d "@$last" -u +%Y-%m-%dT%H:%M:%SZ)" immich_server 2>&1 | grep -ci 'failed login attempt')
+[ "$n" -eq 0 ] && ok "no failed immich logins" || fail "EVENT   $n failed Immich login attempt(s): docker logs immich_server | grep -i 'failed login'"
+
+# ---------- report ----------
+summary="$( [ $fails -eq 0 ] && echo "ALL OK" || echo "$fails FINDING(S)" ) - pi-security on $(hostname) at $(date '+%F %T %Z'), events since $(date -d "@$last" '+%F %T')"
+report="$summary"$'\n\n'"$report"
+[ $fails -gt 0 ] && report+=$'\n'"CHANGED/BAD lines repeat every hour until fixed or accepted (sudo pi-security --accept, after checking)."$'\n'
+if [ "${1:-}" = --dry-run ]; then printf '%s' "$report"; exit $(( fails > 0 )); fi
+echo "$now" > "$STATE/last-run"
+if [ -n "$HC_SECURITY_URL" ]; then
+  target="$HC_SECURITY_URL"; [ $fails -gt 0 ] && target="$HC_SECURITY_URL/fail"
+  curl -fsS -m 15 --retry 5 -o /dev/null --data-raw "$report" "$target" || echo "ping to healthchecks.io failed" >&2
+else
+  echo "HC_SECURITY_URL not set in /etc/pi-health.env: report not sent" >&2
+fi
+printf '%s' "$report"
+exit $(( fails > 0 ))

@@ -24,8 +24,9 @@ immich/                Immich compose project (server, ML, postgres, valkey)
 backup/                restic -> Cloudflare R2 backup script + timer, restore-test script
 docs/                  docs/immich-operations.md: Immich runbook, migration history, backup & restore
 health/                hourly pi-health check -> healthchecks.io (emails on failure or silence)
+security/              hourly pi-security intrusion check -> its own healthchecks.io check
 host/setup.sh          on the Pi: Docker, cloudflared systemd service, host authorized_keys, /opt/immich
-host/install-ops.sh    on the Pi: installs backup/ and health/ (scripts + timers), called by setup.sh
+host/install-ops.sh    on the Pi: installs backup/, health/, security/ (scripts + timers), called by setup.sh
 AGENTS.md, CLAUDE.md   guidance for people and AI agents working on this server
 cloudflare/setup.sh    tunnel (wrangler), ingress, DNS, Access app + policy
 deploy.sh              rsync to the Pi, run host/setup.sh, compose up
@@ -124,8 +125,9 @@ To revoke a machine, delete its line and redeploy. Don't edit `~/.ssh/authorized
 
 ```bash
 cd /opt/home-server
-sudo docker compose logs -f
-sudo docker compose up -d --build     # rebuild the agent image
+alias hs='sudo docker compose --env-file /etc/home-server/.env'   # secrets are root-only, see below
+hs logs -f
+hs up -d --build                      # rebuild the agent image
 ssh -p 2222 agent@localhost           # or: sudo docker exec -it -u agent agent bash
 sudo docker restart agent             # restart the Hermes gateway (e.g. after `hermes setup`)
 
@@ -133,6 +135,8 @@ systemctl status cloudflared
 journalctl -u cloudflared -f
 sudo apt update && sudo apt install --only-upgrade cloudflared && sudo systemctl restart cloudflared
 ```
+
+**Secrets on the Pi:** `.env` exists only on the Mac. `deploy.sh` uploads it and `host/setup.sh` moves it to `/etc/home-server/.env` (root 600), so the host user and agents can't read the tunnel or Access tokens. Never copy it back into `/opt/home-server` (`pi-security` alerts if it's there).
 
 Changing keys: edit `AUTHORIZED_KEYS` in `.env` and redeploy; deploy rewrites the host's `authorized_keys` and the entrypoint rewrites the container's on start.
 
@@ -165,10 +169,11 @@ Limits:
 - Cloudflare rejects request bodies over 100 MB on the free plan, so large videos and bulk imports (Google Takeout via `immich-go`) should go to `http://localhost:2283` on the Pi or the LAN URL.
 - Off-site backup: nightly restic to Cloudflare R2 (03:00, keeps ~1 year). Setup, costs, restore and disaster recovery are in [docs/immich-operations.md](docs/immich-operations.md).
 - Monitoring: hourly `pi-health` → healthchecks.io, which emails on any failure or if the Pi goes silent. What to do per alert: docs §8.
+- Intrusion detection: hourly `pi-security` → a second healthchecks.io check. Logins, sudo failures, changed system files, new ports/containers, new Immich users/devices/keys/links: docs §11.
 
 ## Notes
 
 - Nothing in `/opt/immich` is managed by rsync, so `deploy.sh --delete` never touches photos or the database.
 - The agent container has no Docker socket. Mounting `/var/run/docker.sock` would give it root on the host.
 - On the LAN you can skip Cloudflare: `ssh berkslv@192.168.1.100`, and for the agent `ssh -J berkslv@192.168.1.100 -p 2222 agent@localhost`.
-- The host sshd still accepts passwords on the LAN; Cloudflare Access gates the public hostname.
+- The host sshd is key-only everywhere (`/etc/ssh/sshd_config.d/00-hardening.conf`, written by `host/setup.sh`); Cloudflare Access also gates the public hostname.

@@ -10,6 +10,7 @@ Raspberry Pi 4 (aarch64, Ubuntu, 459 GB USB SSD, LAN `192.168.1.100`, user `berk
 - **agent** container (Claude Code / opencode / Hermes) on `127.0.0.1:2222`
 - **cloudflared** systemd service (Tunnel; no router ports open)
 - **restic → Cloudflare R2** nightly backup, **pi-health** hourly check → healthchecks.io (emails the owner)
+- **pi-security** hourly intrusion check → its own healthchecks.io check (docs §11)
 
 ## Hard rules
 
@@ -23,7 +24,10 @@ Raspberry Pi 4 (aarch64, Ubuntu, 459 GB USB SSD, LAN `192.168.1.100`, user `berk
    sudo, say what command the owner should run instead of working around it.
 4. **Don't change the backup schedule or retention** (daily 03:00; keep 7 daily / 4 weekly / 12 monthly).
    The owner decided this explicitly.
-5. **Ask before** deleting anything under `/opt/immich`, running `restic forget/prune` by hand, upgrading
+5. **After any legitimate system change** (deploy, package/user/key/port/container change, Immich upgrade), `pi-security`
+   will report it every hour until someone checks it and runs `sudo pi-security --accept`. Tell the owner, don't
+   accept silently on their behalf unless they asked for the change.
+6. **Ask before** deleting anything under `/opt/immich`, running `restic forget/prune` by hand, upgrading
    Immich, restarting cloudflared (cuts remote access), or touching sshd config.
 
 ## Where the source of truth is
@@ -42,22 +46,24 @@ Raspberry Pi 4 (aarch64, Ubuntu, 459 GB USB SSD, LAN `192.168.1.100`, user `berk
 
 | Secret | Path (root 600) | Recovery |
 |---|---|---|
-| Tunnel token, SSH keys, Access service token `immich-app`, GH token | `/opt/home-server/.env` (and the Mac's copy) | `cloudflare/setup.sh` re-creates |
+| Tunnel token, SSH keys, Access service token `immich-app`, GH token, API keys | Mac: `home-server/.env`. Pi: `/etc/home-server/.env` (root 600, put there by deploy). **Never** in `/opt/home-server`. | `cloudflare/setup.sh` re-creates |
 | Immich DB password | `/opt/immich/.env` | new one on rebuild |
 | R2 keys | `/etc/restic/r2.env` | new token in Cloudflare dashboard (R2 → bucket `immich-backup` only) |
 | restic repo password | `/etc/restic/password` | **owner's password manager only. Lost = backup unreadable.** |
-| healthchecks.io ping URL | `/etc/pi-health.env` | healthchecks.io dashboard |
+| healthchecks.io ping URLs (`HC_URL`, `HC_SECURITY_URL`) | `/etc/pi-health.env` | healthchecks.io dashboard |
 | cloudflared token | `/etc/cloudflared/tunnel.env` | written from `.env` by setup.sh |
 
 ## Common tasks (all need sudo)
 
 ```bash
 sudo pi-health --dry-run                         # full status in one go (17 checks)
+sudo pi-security --dry-run                       # intrusion check; --accept after a verified change
 sudo journalctl -u immich-backup -n 30           # last backup run
 sudo immich-backup restic snapshots              # any restic command with env loaded
 sudo immich-restore-test                         # restore a random sample from R2 and compare
 alias immich='sudo docker compose -f /opt/home-server/immich/docker-compose.yml --env-file /opt/immich/.env'
 immich ps; immich logs -f immich-server
+alias hs='sudo docker compose -f /opt/home-server/docker-compose.yml --env-file /etc/home-server/.env'  # agent
 ```
 
 - **Alert email from healthchecks.io:** docs §8 has a table per failing check.
@@ -77,7 +83,7 @@ immich ps; immich logs -f immich-server
 - Cloudflare free plan rejects request bodies **> 100 MB**: bulk imports and big videos go to `localhost:2283`
   or the LAN URL, not the public hostname.
 - Public `immich.berkslv.com` answers anonymous requests with a 302 to Cloudflare Access; scripts pass
-  `CF-Access-Client-Id/Secret` from `.env`. `localhost:20241/ready` = tunnel connected to the edge.
+  `CF-Access-Client-Id/Secret` from `/etc/home-server/.env`. `localhost:20241/ready` = tunnel connected to the edge.
 - `vcgencmd` doesn't work on this Ubuntu; temperature is `/sys/class/thermal/thermal_zone0/temp`,
   under-voltage is in `journalctl -k`.
 - Immich v3 DB: there is no `encodedVideoPath` / `isVisible` on `asset`; derived files are in `asset_file`
@@ -85,3 +91,8 @@ immich ps; immich logs -f immich-server
 - CPU-temperature alerts (≥ 80 °C) during heavy ML or transcoding are expected; they clear by themselves.
   The real fix is a fan.
 - Running `immich-machine-learning` without its CPU cap makes the Pi unusable; keep `cpus: 1.0`.
+- `sshd -T` prints keys in mixed case on this Ubuntu (`PasswordAuthentication no`); compare case-insensitively.
+- `50-cloud-init.conf` says `PasswordAuthentication yes`, but `00-hardening.conf` sorts first and sshd keeps the
+  first value it reads, so passwords are off. Don't rename `00-hardening.conf`.
+- `ufw` service is "active" but the firewall reports `Status: inactive` (no rules). Docker-published ports bypass
+  ufw anyway; exposure is controlled by what listens (`pi-security` baselines it).

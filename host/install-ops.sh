@@ -5,10 +5,11 @@
 #   backup/immich-backup        -> /usr/local/sbin/immich-backup        + immich-backup.{service,timer}
 #   backup/restore-test         -> /usr/local/sbin/immich-restore-test
 #   health/pi-health            -> /usr/local/sbin/pi-health            + pi-health.{service,timer}
+#   security/pi-security        -> /usr/local/sbin/pi-security          + pi-security.{service,timer}
 #
 # Secrets are never in the repo. Timers are only enabled once their secret files exist:
 #   /etc/restic/r2.env, /etc/restic/password   (backup)
-#   /etc/pi-health.env                         (health check)
+#   /etc/pi-health.env                         (health check: HC_URL; security check: HC_SECURITY_URL)
 # See docs/immich-operations.md §4, §7.
 #
 # Usage: sudo ./host/install-ops.sh
@@ -40,10 +41,12 @@ put() {  # put <src> <dest> <mode>
 put "$DIR/backup/immich-backup" /usr/local/sbin/immich-backup       700
 put "$DIR/backup/restore-test"  /usr/local/sbin/immich-restore-test 700
 put "$DIR/health/pi-health"     /usr/local/sbin/pi-health           700
-for u in backup/immich-backup.service backup/immich-backup.timer health/pi-health.service health/pi-health.timer; do
+put "$DIR/security/pi-security" /usr/local/sbin/pi-security         700
+for u in backup/immich-backup.service backup/immich-backup.timer health/pi-health.service health/pi-health.timer \
+         security/pi-security.service security/pi-security.timer; do
     put "$DIR/$u" "/etc/systemd/system/$(basename "$u")" 644
 done
-install -d -m 700 /etc/restic /var/lib/immich-backup /var/cache/restic
+install -d -m 700 /etc/restic /var/lib/immich-backup /var/cache/restic /var/lib/pi-security
 systemctl daemon-reload
 
 # Enable timers only when their secrets are present (never start a backup from here)
@@ -59,3 +62,11 @@ if [ -s /etc/pi-health.env ]; then
 else
     warn "Health check NOT enabled: create /etc/pi-health.env with HC_URL=https://hc-ping.com/<uuid> (docs §7)"
 fi
+
+# Security check: first install takes the current state as the baseline; later changes are reported
+# (and accepted by hand with `sudo pi-security --accept`), so a deploy never silently re-baselines.
+[ -d /var/lib/pi-security/baseline ] || { log "pi-security: creating baseline"; /usr/local/sbin/pi-security --accept; }
+systemctl enable --now pi-security.timer >/dev/null
+log "pi-security.timer: $(systemctl is-active pi-security.timer)"
+grep -qs '^HC_SECURITY_URL=.' /etc/pi-health.env \
+    || warn "pi-security runs but can't email: add HC_SECURITY_URL=https://hc-ping.com/<uuid> to /etc/pi-health.env (docs §11)"

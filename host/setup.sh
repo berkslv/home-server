@@ -3,8 +3,9 @@
 # Host bootstrap, run on the Pi as root by deploy.sh. Idempotent.
 #   - Docker (Ubuntu packages) for the agent and Immich containers
 #   - /opt/immich (root-only) with a generated DB password on first run
-#   - cloudflared as a systemd service, tunnel token from .env
-#   - AUTHORIZED_KEYS from .env -> host user's ~/.ssh/authorized_keys
+#   - deploy secrets: /etc/home-server/.env (root 600; deploy.sh hands .env over, it never stays in the repo dir)
+#   - cloudflared as a systemd service, tunnel token from that .env
+#   - AUTHORIZED_KEYS from that .env -> host user's ~/.ssh/authorized_keys
 #   - backup / restore-test / health check via host/install-ops.sh
 #
 # Usage: sudo HOST_USER=berkslv ./host/setup.sh
@@ -15,9 +16,19 @@ HOST_USER="${HOST_USER:?HOST_USER is required}"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 log() { echo -e "\033[0;34m[INFO]\033[0m $*"; }
 
+# Deploy secrets live root-only in /etc/home-server/.env, never in the repo dir: the host user (and so
+# any agent running as it) must not be able to read the tunnel token or the Access service token.
+# deploy.sh uploads .env as $DIR/.env.incoming; take it over and delete it. ($DIR/.env: pre-2026-11-19 layout)
+ENV_FILE=/etc/home-server/.env
+install -d -m 700 -o root -g root /etc/home-server
+for f in "$DIR/.env.incoming" "$DIR/.env"; do
+    if [ -f "$f" ]; then install -m 600 -o root -g root "$f" "$ENV_FILE"; rm -f "$f"; log "secrets -> $ENV_FILE"; fi
+done
+[ -f "$ENV_FILE" ] || { echo "$ENV_FILE missing: run deploy.sh from the machine that has .env" >&2; exit 1; }
+
 # Read only the values we need from .env (docker-compose syntax, quoted multi-line values allowed)
-TUNNEL_TOKEN=$(grep -E '^TUNNEL_TOKEN=' "$DIR/.env" | tail -1 | cut -d= -f2- | tr -d '"')
-AUTHORIZED_KEYS=$(awk '/^AUTHORIZED_KEYS=/{f=1; sub(/^AUTHORIZED_KEYS="?/, "")} f{if (sub(/"$/, "")) {print; exit} print}' "$DIR/.env")
+TUNNEL_TOKEN=$(grep -E '^TUNNEL_TOKEN=' "$ENV_FILE" | tail -1 | cut -d= -f2- | tr -d '"')
+AUTHORIZED_KEYS=$(awk '/^AUTHORIZED_KEYS=/{f=1; sub(/^AUTHORIZED_KEYS="?/, "")} f{if (sub(/"$/, "")) {print; exit} print}' "$ENV_FILE")
 [ -n "$TUNNEL_TOKEN" ] || { echo "TUNNEL_TOKEN missing in .env" >&2; exit 1; }
 [ -n "$AUTHORIZED_KEYS" ] || { echo "AUTHORIZED_KEYS missing in .env" >&2; exit 1; }
 

@@ -16,7 +16,7 @@ BACKUP_MAX_H=36        # hours since last successful R2 backup
 DUMP_MAX_H=26          # hours since last Immich DB dump
 CONTAINERS="immich_server immich_machine_learning immich_postgres immich_redis agent"
 PUBLIC_URL=https://immich.berkslv.com/api/server/ping
-ACCESS_ENV=/opt/home-server/.env    # IMMICH_ACCESS_CLIENT_ID / _SECRET (Access service token)
+ACCESS_ENV=/etc/home-server/.env    # IMMICH_ACCESS_CLIENT_ID / _SECRET (Access service token), root 600
 
 fails=0; report=""
 ok()   { report+="OK    $*"$'\n'; }
