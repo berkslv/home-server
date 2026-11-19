@@ -124,9 +124,18 @@ sudo immich-backup restic stats --mode raw-data      # bytes actually stored in 
 sudo immich-backup restic ls latest /opt/immich/library/backups
 ```
 
-The first full upload started 2026-11-17 11:22, at about 22 h for 121 GB.
+The first full upload ran 2026-11-17 11:22 → 2026-11-18 09:33 (22 h, 114.7 GiB).
+Nightly runs after that only upload what's new (2026-11-19: +8.8 GiB in 1 h 43 min).
 
-- [ ] After it finishes, run a restore test (below) and record the date here.
+**Restore tests**
+
+| Date | Snapshot | Sample | Result |
+|---|---|---|---|
+| 2026-11-19 | 3d8094bb | 65 originals (heic/jpg/png/mov/mp4) + newest DB dump, 353 MiB in 42 s | PASS: all byte-identical, dump gzip OK (85 tables) |
+
+Run it again with `sudo immich-restore-test` (repo: `backup/restore-test`). It restores a random
+sample from the latest snapshot into a root-only temporary folder, compares it with the live files
+and deletes it again. `sudo N=200 immich-restore-test` for a bigger sample.
 
 ### Restore a few files (test, or recover something deleted)
 
@@ -197,7 +206,7 @@ To bring back a photo that was deleted in Immich: restore the file, then upload 
   - `sudo journalctl -u immich-backup --since -2d` shows the run succeeded.
   - `restic snapshots` shows a recent snapshot.
   - Check disk space with `df -h /`.
-- **Twice a year:** do a small restore test (§4).
+- **Twice a year:** `sudo immich-restore-test` and add a row to the restore-test table (§4).
 - **Temperature:** the Pi runs at 85 °C+ under transcoding and throttles itself. A fan case helps.
 
 ---

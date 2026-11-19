@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Installed as /usr/local/sbin/immich-restore-test. Usage: sudo immich-restore-test    (sudo N=200 immich-restore-test for a bigger sample)
+# Restore test: random sample of originals + newest DB dump from latest R2 snapshot,
+# compared byte-for-byte with the live files. Restore dir is root-only and removed after.
+set -euo pipefail
+B=/usr/local/sbin/immich-backup
+LIB=/opt/immich/library
+T=/opt/immich/restore-test
+N=${N:-60}
+rm -rf "$T"; install -d -m 700 "$T"; trap 'rm -rf "$T"' EXIT
+
+snap=$($B restic snapshots --latest 1 --json | python3 -c 'import sys,json;print(json.load(sys.stdin)[-1]["short_id"])')
+echo "snapshot: $snap"
+
+# candidate files: in snapshot AND still present unchanged-path on disk
+$B restic ls "$snap" --json 2>/dev/null | python3 -c '
+import sys,json
+for l in sys.stdin:
+    d=json.loads(l)
+    if d.get("type")=="file" and d.get("struct_type")=="node": print(d["path"])' > "$T/all.txt"
+echo "files in snapshot: $(wc -l < "$T/all.txt")"
+
+grep -E "^$LIB/(library|upload)/" "$T/all.txt" | grep -viE '\.(json|xmp)$' | shuf -n "$N" > "$T/pick.txt"
+# make sure the sample includes some videos and one big file
+grep -E "^$LIB/(library|upload)/" "$T/all.txt" | grep -iE '\.(mp4|mov)$' | shuf -n 5 >> "$T/pick.txt"
+grep -E "^$LIB/backups/immich-db-backup-.*\.sql\.gz$" "$T/all.txt" | sort | tail -1 >> "$T/pick.txt"
+sort -u -o "$T/pick.txt" "$T/pick.txt"
+echo "sample: $(wc -l < "$T/pick.txt") files"
+
+start=$(date +%s)
+$B restic restore "$snap" --target "$T/r" --include-file "$T/pick.txt" 2>&1 | tail -2
+echo "restore took $(( $(date +%s) - start ))s, $(du -sh "$T/r" | cut -f1)"
+
+ok=0; bad=0; gone=0
+while IFS= read -r f; do
+  r="$T/r$f"
+  if [ ! -f "$r" ]; then echo "NOT RESTORED: ${f#$LIB/}"; bad=$((bad+1)); continue; fi
+  if [ ! -f "$f" ]; then gone=$((gone+1)); continue; fi   # deleted from live since snapshot
+  if cmp -s "$f" "$r"; then ok=$((ok+1)); else echo "MISMATCH: ${f#$LIB/}"; bad=$((bad+1)); fi
+done < "$T/pick.txt"
+echo "identical: $ok   mismatch/missing: $bad   no longer on disk: $gone"
+
+dump=$(find "$T/r" -name 'immich-db-backup-*.sql.gz' | head -1)
+if gzip -t "$dump"; then echo "db dump $(basename "$dump"): gzip OK, $(zcat "$dump" | grep -c '^CREATE TABLE') CREATE TABLE statements, $(zcat "$dump" | grep -c '^COPY ') COPY blocks"; fi
+echo "types restored: $(sed 's/.*\.//' "$T/pick.txt" | tr A-Z a-z | sort | uniq -c | tr -s ' ' | tr '\n' ' ')"
+[ $bad -eq 0 ] && echo RESULT: PASS || { echo RESULT: FAIL; exit 1; }
