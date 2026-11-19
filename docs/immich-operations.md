@@ -31,7 +31,7 @@ This file never contains secrets. Each one is listed by where it lives.
 | `/etc/pi-health.env` | healthchecks.io ping URL (root 600) | no. It's shown in the healthchecks.io dashboard. |
 | `/var/lib/immich-backup/last-success` | epoch time of the last fully successful backup run, read by `pi-health` | no |
 
-Leftovers in `/opt/immich`, safe to delete: `docker-compose.yml` and `docker-compose.yml.bak` (the original standalone install, superseded by the repo's compose file), `import.sh`, `import-logs/`, `immich-go.env` (contains the import API key). The root tmux session `immich-import` is also a leftover.
+The import leftovers (old standalone compose files, `import.sh`, `import-logs/`, `immich-go.env`, the root tmux session `immich-import`) were removed on 2026-11-19. `/opt/immich` now holds only `.env`, `library/` and `postgres/`. `/usr/local/bin/immich-go` is kept for re-uploading restored files (§4).
 
 ### Managing it
 
@@ -76,8 +76,8 @@ To run ML on the Mac again for a large batch, start the `immich-machine-learning
 6. **Cleanup.** The downloaded and extracted Takeout files were deleted afterwards.
 
 **To-do from the migration:**
-- [ ] Delete the `import` API key (Account Settings → API Keys) and `/opt/immich/immich-go.env`.
-- [ ] Remove the leftovers listed in §1.
+- [x] Delete the `import` API key and `/opt/immich/immich-go.env` (2026-11-19).
+- [x] Remove the import leftovers (2026-11-19).
 - [ ] Change the sudo password. It was shared in an AI chat session.
 
 ---
